@@ -1,0 +1,97 @@
+/**
+ * Analyzes biometric attendance log data and generates a structured report.
+ * 
+ * Data Format: EmployeeID Date Time VerifyMode InOutStatus WorkCode Reserved
+ * Column meanings:
+ * - EmployeeID: Worker ID
+ * - Date: Attendance date (YYYY-MM-DD)
+ * - Time: Scan time (HH:MM:SS)
+ * - InOutStatus: 0 means IN, 1 means OUT
+ */
+export function analyzeAttendance(fileText, employeeId, month, year) {
+  const lines = fileText.trim().split('\n');
+  const records = [];
+
+  lines.forEach(line => {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length < 5) return;
+
+    const [id, date, time, verifyMode, inOutStatus] = parts;
+    const [logYear, logMonth] = date.split('-').map(Number);
+
+    // Apply Filters: Employee ID, Month, Year
+    if (id === employeeId && logMonth === parseInt(month) && logYear === parseInt(year)) {
+      records.push({
+        id,
+        date,
+        time,
+        inOutStatus: parseInt(inOutStatus)
+      });
+    }
+  });
+
+  // Group records by Date
+  const groupedByDate = records.reduce((acc, rec) => {
+    if (!acc[rec.date]) acc[rec.date] = [];
+    acc[rec.date].push(rec);
+    return acc;
+  }, {});
+
+  const dailyRecords = [];
+  let totalOutMissingDays = 0;
+  let totalNormalDays = 0;
+
+  const sortedDates = Object.keys(groupedByDate).sort();
+
+  sortedDates.forEach(date => {
+    const dayRecords = groupedByDate[date];
+    const inScans = dayRecords.filter(r => r.inOutStatus === 0).sort((a, b) => a.time.localeCompare(b.time));
+    const outScans = dayRecords.filter(r => r.inOutStatus === 1).sort((a, b) => a.time.localeCompare(b.time));
+
+    const scanCount = dayRecords.length;
+    let inTimeStr = "-";
+    let outTimeStr = "-";
+    let totalHours = "UNKNOWN";
+    let status = "NO IN RECORD";
+
+    if (inScans.length > 0) {
+      const earliestIn = inScans[0].time;
+      inTimeStr = earliestIn.substring(0, 5); // HH:MM
+
+      if (outScans.length > 0) {
+        const latestOut = outScans[outScans.length - 1].time;
+        outTimeStr = latestOut.substring(0, 5); // HH:MM
+
+        // Calculate hours
+        const diffMs = new Date(`${date}T${latestOut}`) - new Date(`${date}T${earliestIn}`);
+        totalHours = parseFloat((diffMs / (1000 * 60 * 60)).toFixed(2));
+        status = "NORMAL";
+        totalNormalDays++;
+      } else {
+        status = "OUT MISSING";
+        totalOutMissingDays++;
+      }
+    }
+
+    dailyRecords.push({
+      date,
+      inTime: inTimeStr,
+      outTime: outTimeStr,
+      totalHours,
+      scanCount,
+      status
+    });
+  });
+
+  return {
+    employeeId,
+    month,
+    year,
+    summary: {
+      totalDaysWithRecords: dailyRecords.length,
+      totalOutMissingDays,
+      totalNormalDays
+    },
+    dailyRecords
+  };
+}
