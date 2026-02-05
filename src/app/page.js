@@ -21,6 +21,7 @@ import { analyzeAttendance, getEmployeeIds } from "@/lib/attendance";
 import { Parser } from "json2csv";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+import JSZip from "jszip";
 
 function cn(...inputs) {
   return twMerge(clsx(inputs));
@@ -133,6 +134,39 @@ export default function Home() {
     } catch (err) {
       console.error("CSV Export failed", err);
     }
+  };
+
+  const downloadAllAsZip = async () => {
+    if (results.length === 0) return;
+
+    const zip = new JSZip();
+    const folder = zip.folder(`Attendance_Reports_${month}_${year}`);
+
+    results.forEach(res => {
+      const records = res.dailyRecords;
+      const data = records.map(r => ({
+        employeeId: res.employeeId,
+        date: r.date,
+        inTime: r.inTime,
+        outTime: r.outTime,
+        totalHours: r.totalHours,
+        scanCount: r.scanCount,
+        status: r.status
+      }));
+
+      const parser = new Parser({
+        fields: ["employeeId", "date", "inTime", "outTime", "totalHours", "scanCount", "status"]
+      });
+      const csv = parser.parse(data);
+      folder.file(`Attendance_${res.employeeId}_${month}_${year}.csv`, csv);
+    });
+
+    const content = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(content);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Attendance_Reports_${month}_${year}.zip`);
+    link.click();
   };
 
   const result = results[activeResultIndex];
@@ -370,17 +404,27 @@ export default function Home() {
                     />
                   </div>
 
-                  {/* Daily Records Table */}
                   <div className="glass-morphism rounded-3xl overflow-hidden">
-                    <div className="p-6 border-b border-glass-border flex justify-between items-center bg-white/5">
+                    <div className="p-6 border-b border-glass-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/5">
                       <h3 className="text-xl font-semibold">Daily Attendance Log</h3>
-                      <button
-                        onClick={downloadCSV}
-                        className="flex items-center gap-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-xl transition-colors text-sm font-medium"
-                      >
-                        <Download className="w-4 h-4" />
-                        Download CSV
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        {results.length > 1 && (
+                          <button
+                            onClick={downloadAllAsZip}
+                            className="flex items-center gap-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 px-4 py-2 rounded-xl transition-colors text-sm font-medium border border-purple-500/20"
+                          >
+                            <Download className="w-4 h-4" />
+                            Download All (ZIP)
+                          </button>
+                        )}
+                        <button
+                          onClick={downloadCSV}
+                          className="flex items-center gap-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-xl transition-colors text-sm font-medium border border-indigo-500/20"
+                        >
+                          <Download className="w-4 h-4" />
+                          Download CSV
+                        </button>
+                      </div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-left">
