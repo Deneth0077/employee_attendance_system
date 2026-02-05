@@ -14,9 +14,10 @@ import {
   Filter,
   BarChart3,
   ChevronRight,
-  ChevronDown
+  ChevronDown,
+  Search
 } from "lucide-react";
-import { analyzeAttendance } from "@/lib/attendance";
+import { analyzeAttendance, getEmployeeIds } from "@/lib/attendance";
 import { Parser } from "json2csv";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -27,18 +28,45 @@ function cn(...inputs) {
 
 export default function Home() {
   const [file, setFile] = useState(null);
-  const [employeeId, setEmployeeId] = useState("");
+  const [employeeId, setEmployeeId] = useState(""); // Kept for backward compatibility/single input if needed
+  const [availableEmployees, setAvailableEmployees] = useState([]);
+  const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [month, setMonth] = useState(new Date().getMonth() + 1 + "");
   const [year, setYear] = useState(new Date().getFullYear() + "");
-  const [result, setResult] = useState(null);
+  const [results, setResults] = useState([]); // Changed from 'result' to 'results'
+  const [activeResultIndex, setActiveResultIndex] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
       setFile(selectedFile);
       setError("");
+
+      try {
+        const text = await selectedFile.text();
+        const ids = getEmployeeIds(text);
+        setAvailableEmployees(ids);
+        setSelectedEmployees([]); // Reset selection on new file
+      } catch (err) {
+        setError("Error reading file.");
+      }
+    }
+  };
+
+  const toggleEmployeeSelection = (id) => {
+    setSelectedEmployees(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllEmployees = () => {
+    if (selectedEmployees.length === availableEmployees.length) {
+      setSelectedEmployees([]);
+    } else {
+      setSelectedEmployees([...availableEmployees]);
     }
   };
 
@@ -47,8 +75,8 @@ export default function Home() {
       setError("Please upload an attendance log file.");
       return;
     }
-    if (!employeeId) {
-      setError("Please enter an Employee ID.");
+    if (selectedEmployees.length === 0) {
+      setError("Please select at least one Employee ID.");
       return;
     }
 
@@ -57,26 +85,32 @@ export default function Home() {
 
     try {
       const text = await file.text();
-      const analysisResult = analyzeAttendance(text, employeeId, month, year);
+      const allResults = selectedEmployees.map(id =>
+        analyzeAttendance(text, id, month, year)
+      ).filter(res => res.dailyRecords.length > 0);
 
-      // Simulate slight delay for "processing" feel
-      setTimeout(() => {
-        setResult(analysisResult);
-        setIsProcessing(false);
-      }, 800);
+      if (allResults.length === 0) {
+        setError("No records found for selected employees in the given period.");
+        setResults([]);
+      } else {
+        setResults(allResults);
+        setActiveResultIndex(0);
+      }
+      setIsProcessing(false);
     } catch (err) {
-      setError("Error processing file. Please ensure it's a valid biometric log.");
+      setError("Error processing file.");
       setIsProcessing(false);
     }
   };
 
   const downloadCSV = () => {
-    if (!result) return;
+    if (results.length === 0) return;
+    const currentResult = results[activeResultIndex];
 
     try {
-      const records = result.dailyRecords;
+      const records = currentResult.dailyRecords;
       const data = records.map(r => ({
-        employeeId: result.employeeId,
+        employeeId: currentResult.employeeId,
         date: r.date,
         inTime: r.inTime,
         outTime: r.outTime,
@@ -94,12 +128,14 @@ export default function Home() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);
-      link.setAttribute("download", `Attendance_${employeeId}_${month}_${year}.csv`);
+      link.setAttribute("download", `Attendance_${currentResult.employeeId}_${month}_${year}.csv`);
       link.click();
     } catch (err) {
       console.error("CSV Export failed", err);
     }
   };
+
+  const result = results[activeResultIndex];
 
   return (
     <main className="min-h-screen gradient-bg py-12 px-4 sm:px-6 lg:px-8">
@@ -152,17 +188,62 @@ export default function Home() {
                   </label>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <User className="w-4 h-4" /> Employee ID
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 101"
-                    className="w-full bg-glass border border-glass-border rounded-xl px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
-                    value={employeeId}
-                    onChange={(e) => setEmployeeId(e.target.value)}
-                  />
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                      <User className="w-4 h-4" /> Employee IDs
+                    </label>
+                    {availableEmployees.length > 0 && (
+                      <button
+                        onClick={selectAllEmployees}
+                        className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold uppercase tracking-wider"
+                      >
+                        {selectedEmployees.length === availableEmployees.length ? "Deselect All" : "Select All"}
+                      </button>
+                    )}
+                  </div>
+
+                  {availableEmployees.length > 0 && (
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <input
+                        type="text"
+                        placeholder="Search ID..."
+                        className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  <div className="bg-glass border border-glass-border rounded-xl p-3 max-h-48 overflow-y-auto custom-scrollbar">
+                    {availableEmployees.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        {availableEmployees
+                          .filter(id => id.toLowerCase().includes(searchQuery.toLowerCase()))
+                          .map(id => (
+                            <label key={id} className="flex items-center gap-2 p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
+                              <input
+                                type="checkbox"
+                                className="accent-indigo-500 w-4 h-4 rounded border-glass-border bg-glass"
+                                checked={selectedEmployees.includes(id)}
+                                onChange={() => toggleEmployeeSelection(id)}
+                              />
+                              <span className="text-sm font-mono group-hover:text-indigo-400 transition-colors">ID: {id}</span>
+                            </label>
+                          ))}
+                        {availableEmployees.filter(id => id.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                          <div className="col-span-2 py-4 text-center">
+                            <p className="text-xs text-muted-foreground italic">No IDs match your search</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-4">
+                        <p className="text-xs text-muted-foreground italic">Upload a file to see IDs</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -226,7 +307,7 @@ export default function Home() {
           {/* Results Area */}
           <div className="lg:col-span-2 space-y-6">
             <AnimatePresence mode="wait">
-              {!result ? (
+              {results.length === 0 ? (
                 <motion.div
                   key="empty"
                   initial={{ opacity: 0 }}
@@ -237,7 +318,9 @@ export default function Home() {
                   <FileText className="w-16 h-16 text-muted-foreground/30 mb-4" />
                   <h3 className="text-xl font-medium text-muted-foreground">Ready to process</h3>
                   <p className="text-sm text-muted-foreground/60 max-w-sm mt-2">
-                    Enter employee details and upload the log file to see the analysis here.
+                    {availableEmployees.length > 0
+                      ? "Select employee IDs above and click 'Generate Report'."
+                      : "Upload the log file to see available employees and generate reports."}
                   </p>
                 </motion.div>
               ) : (
@@ -247,6 +330,26 @@ export default function Home() {
                   animate={{ opacity: 1, scale: 1 }}
                   className="space-y-6"
                 >
+                  {/* Multi-result selector */}
+                  {results.length > 1 && (
+                    <div className="flex flex-wrap gap-2 pb-2">
+                      {results.map((res, idx) => (
+                        <button
+                          key={res.employeeId}
+                          onClick={() => setActiveResultIndex(idx)}
+                          className={cn(
+                            "px-4 py-2 rounded-xl text-sm font-bold transition-all border",
+                            activeResultIndex === idx
+                              ? "bg-indigo-500 text-white border-indigo-400"
+                              : "bg-glass border-glass-border text-muted-foreground hover:bg-white/10"
+                          )}
+                        >
+                          Employee {res.employeeId}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Summary Cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <SummaryCard
@@ -320,7 +423,7 @@ export default function Home() {
           </div>
         </div>
       </div>
-    </main>
+    </main >
   );
 }
 

@@ -1,4 +1,29 @@
 /**
+ * Extracts unique Employee IDs from the biometric attendance log data.
+ * @param {string} fileText 
+ * @returns {string[]} Sorted unique employee IDs
+ */
+export function getEmployeeIds(fileText) {
+  const lines = fileText.trim().split('\n');
+  const ids = new Set();
+
+  lines.forEach(line => {
+    const parts = line.trim().split(/\s+/);
+    if (parts.length > 0 && parts[0]) {
+      ids.add(parts[0]);
+    }
+  });
+
+  return Array.from(ids).sort((a, b) => {
+    // Attempt numerical sort if possible, otherwise string sort
+    const numA = parseInt(a);
+    const numB = parseInt(b);
+    if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+    return a.localeCompare(b);
+  });
+}
+
+/**
  * Analyzes biometric attendance log data and generates a structured report.
  * 
  * Data Format: EmployeeID Date Time VerifyMode InOutStatus WorkCode Reserved
