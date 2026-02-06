@@ -73,29 +73,36 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
     const inScans = dayRecords.filter(r => r.inOutStatus === 0).sort((a, b) => a.time.localeCompare(b.time));
     const outScans = dayRecords.filter(r => r.inOutStatus === 1).sort((a, b) => a.time.localeCompare(b.time));
 
+    const allDayLogs = dayRecords.map(r => ({
+      time: r.time.substring(0, 5),
+      type: r.inOutStatus === 0 ? "IN" : "OUT"
+    })).sort((a, b) => a.time.localeCompare(b.time));
+
     const scanCount = dayRecords.length;
     let inTimeStr = "-";
     let outTimeStr = "-";
-    let totalHours = "UNKNOWN";
-    let status = "NO IN RECORD";
+    let totalHours = 0;
+    let status = "NO RECORD";
 
-    if (inScans.length > 0) {
+    if (inScans.length > 0 && outScans.length > 0) {
       const earliestIn = inScans[0].time;
-      inTimeStr = earliestIn.substring(0, 5); // HH:MM
+      const latestOut = outScans[outScans.length - 1].time;
+      inTimeStr = earliestIn.substring(0, 5);
+      outTimeStr = latestOut.substring(0, 5);
 
-      if (outScans.length > 0) {
-        const latestOut = outScans[outScans.length - 1].time;
-        outTimeStr = latestOut.substring(0, 5); // HH:MM
-
-        // Calculate hours
-        const diffMs = new Date(`${date}T${latestOut}`) - new Date(`${date}T${earliestIn}`);
-        totalHours = parseFloat((diffMs / (1000 * 60 * 60)).toFixed(2));
-        status = "NORMAL";
-        totalNormalDays++;
-      } else {
-        status = "OUT MISSING";
-        totalOutMissingDays++;
-      }
+      const diffMs = new Date(`${date}T${latestOut}`) - new Date(`${date}T${earliestIn}`);
+      totalHours = parseFloat((diffMs / (1000 * 60 * 60)).toFixed(2));
+      status = "NORMAL";
+      totalNormalDays++;
+    } else if (inScans.length > 0) {
+      inTimeStr = inScans[0].time.substring(0, 5);
+      totalHours = 8; // Requirement: One scan only = 8 hours
+      status = "OUT MISSING";
+      totalOutMissingDays++;
+    } else if (outScans.length > 0) {
+      outTimeStr = outScans[outScans.length - 1].time.substring(0, 5);
+      totalHours = 8; // Requirement: One scan only = 8 hours
+      status = "NO IN RECORD";
     }
 
     dailyRecords.push({
@@ -104,7 +111,8 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
       outTime: outTimeStr,
       totalHours,
       scanCount,
-      status
+      status,
+      logs: allDayLogs
     });
   });
 

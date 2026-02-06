@@ -39,6 +39,7 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedDayLogs, setSelectedDayLogs] = useState(null);
 
   const handleFileUpload = async (e) => {
     const selectedFile = e.target.files[0];
@@ -250,7 +251,7 @@ export default function Home() {
                     </div>
                   )}
 
-                  <div className="bg-glass border border-glass-border rounded-xl p-3 max-h-48 overflow-y-auto custom-scrollbar">
+                  <div className="bg-glass border border-glass-border rounded-xl p-3 max-h-80 overflow-y-auto custom-scrollbar">
                     {availableEmployees.length > 0 ? (
                       <div className="grid grid-cols-2 gap-2">
                         {availableEmployees
@@ -433,7 +434,8 @@ export default function Home() {
                             <th className="px-6 py-4 font-semibold">Date</th>
                             <th className="px-6 py-4 font-semibold">IN Time</th>
                             <th className="px-6 py-4 font-semibold">OUT Time</th>
-                            <th className="px-6 py-4 font-semibold">Hours</th>
+                            <th className="px-6 py-4 font-semibold text-center">Scans</th>
+                            <th className="px-6 py-4 font-semibold text-center">Hours</th>
                             <th className="px-6 py-4 font-semibold">Status</th>
                           </tr>
                         </thead>
@@ -449,7 +451,15 @@ export default function Home() {
                               <td className="px-6 py-4 font-medium">{row.date}</td>
                               <td className="px-6 py-4 text-emerald-400 font-mono">{row.inTime}</td>
                               <td className="px-6 py-4 text-orange-400 font-mono">{row.outTime}</td>
-                              <td className="px-6 py-4 font-semibold">
+                              <td className="px-6 py-4 text-center">
+                                <button
+                                  onClick={() => setSelectedDayLogs({ date: row.date, logs: row.logs })}
+                                  className="bg-white/10 hover:bg-indigo-500/20 text-indigo-400 px-3 py-1 rounded-lg text-xs font-bold transition-all border border-white/5 hover:border-indigo-500/30"
+                                >
+                                  {row.scanCount}
+                                </button>
+                              </td>
+                              <td className="px-6 py-4 font-semibold text-center">
                                 {typeof row.totalHours === 'number' ? `${row.totalHours}h` : '--'}
                               </td>
                               <td className="px-6 py-4">
@@ -467,6 +477,60 @@ export default function Home() {
           </div>
         </div>
       </div>
+      <AnimatePresence>
+        {selectedDayLogs && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="glass-morphism rounded-3xl p-8 max-w-sm w-full border border-glass-border shadow-2xl"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-bold text-white">Scan Details</h3>
+                  <p className="text-sm text-muted-foreground">{selectedDayLogs.date}</p>
+                </div>
+                <button
+                  onClick={() => setSelectedDayLogs(null)}
+                  className="p-2 hover:bg-white/10 rounded-xl transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {selectedDayLogs.logs.map((log, i) => (
+                  <div key={i} className="flex justify-between items-center p-3 bg-white/5 rounded-2xl border border-glass-border/50">
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "w-2 h-2 rounded-full",
+                        log.type === "IN" ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" : "bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.5)]"
+                      )} />
+                      <span className="font-mono text-lg font-medium">{log.time}</span>
+                    </div>
+                    <span className={cn(
+                      "text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-md",
+                      log.type === "IN" ? "text-emerald-400 bg-emerald-400/10" : "text-orange-400 bg-orange-400/10"
+                    )}>
+                      {log.type}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setSelectedDayLogs(null)}
+                className="w-full mt-8 bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl transition-all"
+              >
+                Close
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </main >
   );
 }
