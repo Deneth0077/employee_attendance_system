@@ -504,19 +504,31 @@ export default function Home() {
               <div className="space-y-3">
                 {selectedDayLogs.logs.map((log, i) => (
                   <div key={i} className="flex justify-between items-center p-3 bg-white/5 rounded-2xl border border-glass-border/50">
-                    <div className="flex items-center gap-3">
-                      <div className={cn(
-                        "w-2 h-2 rounded-full",
-                        log.type === "IN" ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" : "bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.5)]"
-                      )} />
-                      <span className="font-mono text-lg font-medium">{log.time}</span>
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-3">
+                        <div className={cn(
+                          "w-2 h-2 rounded-full",
+                          log.type === "IN" ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" : "bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.5)]"
+                        )} />
+                        <span className="font-mono text-lg font-medium tracking-tight">{log.displayTime}</span>
+                        <div className="flex gap-1.5">
+                          <span className={cn(
+                            "text-[9px] font-bold px-1.5 py-0.5 rounded-md",
+                            log.type === "IN" ? "text-emerald-400 bg-emerald-400/10" : "text-orange-400 bg-orange-400/10"
+                          )}>
+                            {log.type}
+                          </span>
+                          {log.isDuplicate && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-white/10 text-white/40 border border-white/5 uppercase tracking-tighter">
+                              Double Tap
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground ml-5 font-mono">
+                        {log.displayDate}
+                      </span>
                     </div>
-                    <span className={cn(
-                      "text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-md",
-                      log.type === "IN" ? "text-emerald-400 bg-emerald-400/10" : "text-orange-400 bg-orange-400/10"
-                    )}>
-                      {log.type}
-                    </span>
                   </div>
                 ))}
               </div>

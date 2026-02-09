@@ -67,21 +67,24 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
   // 2. Sort records chronologically
   allEmployeeRecords.sort((a, b) => a.dateTime - b.dateTime);
 
-  // 2.5 Deduplicate: Skip scans of the same type (IN/IN or OUT/OUT) that occur within 1 hour
-  const uniqueRecords = [];
+  // 2.5 Identify Double Taps: Mark scans of same type within 1 hour as duplicate
+  let lastValid = null;
   allEmployeeRecords.forEach(record => {
-    if (uniqueRecords.length === 0) {
-      uniqueRecords.push(record);
+    if (!lastValid) {
+      record.isDuplicate = false;
+      lastValid = record;
     } else {
-      const last = uniqueRecords[uniqueRecords.length - 1];
-      const diffMs = record.dateTime - last.dateTime;
-      // If same status and within 60 minutes, it's likely a double-tap error
-      if (record.inOutStatus === last.inOutStatus && diffMs < 60 * 60 * 1000) {
-        return;
+      const diffMs = record.dateTime - lastValid.dateTime;
+      if (record.inOutStatus === lastValid.inOutStatus && diffMs < 60 * 60 * 1000) {
+        record.isDuplicate = true;
+      } else {
+        record.isDuplicate = false;
+        lastValid = record;
       }
-      uniqueRecords.push(record);
     }
   });
+
+  const uniqueRecords = allEmployeeRecords.filter(r => !r.isDuplicate);
 
   // 3. Pair INs and OUTs into sessions
   const sessions = [];
@@ -157,26 +160,30 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
     let dayInTime = "-";
     let dayOutTime = "-";
     let dayStatus = "NORMAL";
-    let scanCount = 0;
-    const allLogs = [];
+
+    const formatTime = (dateObj) => {
+      return dateObj.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    };
+
+    // Find all original records for this specific DATE to show in logs
+    const dayLogs = allEmployeeRecords.filter(r => r.date === date).map(r => ({
+      time: r.time.substring(0, 5),
+      displayTime: formatTime(r.dateTime),
+      displayDate: r.date,
+      dateTime: r.dateTime,
+      type: r.inOutStatus === 0 ? "IN" : "OUT",
+      isDuplicate: r.isDuplicate
+    })).sort((a, b) => a.dateTime - b.dateTime);
 
     daySessions.forEach(sess => {
       if (sess.in) {
-        scanCount++;
-        allLogs.push({
-          time: sess.in.time.substring(0, 5),
-          dateTime: sess.in.dateTime, // Store full date for sorting
-          type: "IN"
-        });
         if (dayInTime === "-") dayInTime = sess.in.time.substring(0, 5);
       }
       if (sess.out) {
-        scanCount++;
-        allLogs.push({
-          time: sess.out.time.substring(0, 5),
-          dateTime: sess.out.dateTime, // Store full date for sorting
-          type: "OUT"
-        });
         dayOutTime = sess.out.time.substring(0, 5);
       }
 
@@ -184,7 +191,6 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
         const diffMs = sess.out.dateTime - sess.in.dateTime;
         totalDayHours += diffMs / (1000 * 60 * 60);
       } else {
-        // If a session has only one scan, default to 8 hours as per previous requirement
         totalDayHours += 8;
         if (sess.status === "OUT MISSING") dayStatus = "OUT MISSING";
         if (sess.status === "NO IN RECORD" && dayStatus === "NORMAL") dayStatus = "NO IN RECORD";
@@ -199,9 +205,9 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
       inTime: dayInTime,
       outTime: dayOutTime,
       totalHours: parseFloat(totalDayHours.toFixed(2)),
-      scanCount,
+      scanCount: dayLogs.length, // Count all taps including duplicates
       status: dayStatus,
-      logs: allLogs.sort((a, b) => a.dateTime - b.dateTime) // Sort by real time, not string
+      logs: dayLogs
     });
   });
 
