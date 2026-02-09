@@ -67,11 +67,27 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
   // 2. Sort records chronologically
   allEmployeeRecords.sort((a, b) => a.dateTime - b.dateTime);
 
+  // 2.5 Deduplicate: Skip scans of the same type (IN/IN or OUT/OUT) that occur within 1 hour
+  const uniqueRecords = [];
+  allEmployeeRecords.forEach(record => {
+    if (uniqueRecords.length === 0) {
+      uniqueRecords.push(record);
+    } else {
+      const last = uniqueRecords[uniqueRecords.length - 1];
+      const diffMs = record.dateTime - last.dateTime;
+      // If same status and within 60 minutes, it's likely a double-tap error
+      if (record.inOutStatus === last.inOutStatus && diffMs < 60 * 60 * 1000) {
+        return;
+      }
+      uniqueRecords.push(record);
+    }
+  });
+
   // 3. Pair INs and OUTs into sessions
   const sessions = [];
   let currentIn = null;
 
-  allEmployeeRecords.forEach((record) => {
+  uniqueRecords.forEach((record) => {
     if (record.inOutStatus === 0) { // IN
       if (currentIn) {
         // Previous IN had no OUT - treat as separate shift (forgot out)
