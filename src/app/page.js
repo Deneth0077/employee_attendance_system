@@ -519,7 +519,7 @@ export default function Home() {
                             {log.type}
                           </span>
                           {log.isDuplicate && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-white/10 text-white/40 border border-white/5 uppercase tracking-tighter">
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-sky-500/10 text-sky-400 border border-sky-500/20 uppercase tracking-tighter">
                               Double Tap
                             </span>
                           )}
