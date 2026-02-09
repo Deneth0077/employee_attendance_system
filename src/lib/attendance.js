@@ -67,33 +67,28 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
   // 2. Sort records chronologically
   allEmployeeRecords.sort((a, b) => a.dateTime - b.dateTime);
 
-  // 2.5 Identify Double Taps: Mark scans of same type within 1 hour as duplicate
+  // 2.5 Identify Double Taps & 3. Pair Sessions
   let lastValid = null;
+  let currentIn = null;
+  const sessions = [];
+
   allEmployeeRecords.forEach(record => {
-    if (!lastValid) {
-      record.isDuplicate = false;
-      lastValid = record;
-    } else {
+    // 1. Double tap detection
+    if (lastValid) {
       const diffMs = record.dateTime - lastValid.dateTime;
       if (record.inOutStatus === lastValid.inOutStatus && diffMs < 60 * 60 * 1000) {
         record.isDuplicate = true;
-      } else {
-        record.isDuplicate = false;
-        lastValid = record;
+        record.reportDate = lastValid.reportDate; // Follow the report date of the previous valid tap
+        return;
       }
     }
-  });
 
-  const uniqueRecords = allEmployeeRecords.filter(r => !r.isDuplicate);
+    record.isDuplicate = false;
+    lastValid = record;
 
-  // 3. Pair INs and OUTs into sessions
-  const sessions = [];
-  let currentIn = null;
-
-  uniqueRecords.forEach((record) => {
     if (record.inOutStatus === 0) { // IN
       if (currentIn) {
-        // Previous IN had no OUT - treat as separate shift (forgot out)
+        // Previous IN had no OUT - close it as missing
         sessions.push({
           date: currentIn.date,
           in: currentIn,
@@ -102,20 +97,28 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
         });
       }
       currentIn = record;
+      record.reportDate = record.date;
     } else { // OUT
       if (currentIn) {
-        // Found a matching OUT for the preceding IN
+        // Found matching OUT for current session
+        record.reportDate = currentIn.date;
         sessions.push({
-          date: currentIn.date, // Session is attributed to the IN date
+          date: currentIn.date,
           in: currentIn,
           out: record,
           status: "NORMAL"
         });
         currentIn = null;
       } else {
-        // OUT without a preceding IN
+        // Orphan OUT without a preceding IN -> Move to PREVIOUS DAY
+        const dateParts = record.date.split('-').map(Number);
+        const d = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+        d.setDate(d.getDate() - 1);
+        const prevDay = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+        record.reportDate = prevDay;
         sessions.push({
-          date: record.date,
+          date: prevDay,
           in: null,
           out: record,
           status: "NO IN RECORD"
@@ -124,7 +127,7 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
     }
   });
 
-  // Handle a lone IN record at the end of the log
+  // Handle remaining lone IN record
   if (currentIn) {
     sessions.push({
       date: currentIn.date,
@@ -134,7 +137,7 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
     });
   }
 
-  // 4. Filter sessions by requested month and year (based on the session's reference date)
+  // 4. Filter sessions by requested month and year (based on the session/report date)
   const filteredSessions = sessions.filter(s => {
     const [sYear, sMonth] = s.date.split('-').map(Number);
     return sMonth === parseInt(month) && sYear === parseInt(year);
@@ -169,8 +172,8 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
       });
     };
 
-    // Find all original records for this specific DATE to show in logs
-    const dayLogs = allEmployeeRecords.filter(r => r.date === date).map(r => ({
+    // Find all original records that should be reported under this specific DATE
+    const dayLogs = allEmployeeRecords.filter(r => r.reportDate === date).map(r => ({
       time: r.time.substring(0, 5),
       displayTime: formatTime(r.dateTime),
       displayDate: r.date,
@@ -191,7 +194,9 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
         const diffMs = sess.out.dateTime - sess.in.dateTime;
         totalDayHours += diffMs / (1000 * 60 * 60);
       } else {
-        totalDayHours += 8;
+        // Requirement update: For incomplete sessions (Missing IN or OUT), 
+        // we set hours to 0 to ensure the final calculation is exact based on real data.
+        totalDayHours += 0;
         if (sess.status === "OUT MISSING") dayStatus = "OUT MISSING";
         if (sess.status === "NO IN RECORD" && dayStatus === "NORMAL") dayStatus = "NO IN RECORD";
       }
@@ -205,7 +210,7 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
       inTime: dayInTime,
       outTime: dayOutTime,
       totalHours: parseFloat(totalDayHours.toFixed(2)),
-      scanCount: dayLogs.length, // Count all taps including duplicates
+      scanCount: dayLogs.length,
       status: dayStatus,
       logs: dayLogs
     });
