@@ -194,9 +194,8 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
         const diffMs = sess.out.dateTime - sess.in.dateTime;
         totalDayHours += diffMs / (1000 * 60 * 60);
       } else {
-        // Requirement update: For incomplete sessions (Missing IN or OUT), 
-        // we set hours to 0 to ensure the final calculation is exact based on real data.
-        totalDayHours += 0;
+        // If exact pair is missing, provide default 8 hours as requested for forgotten taps.
+        totalDayHours += 8;
         if (sess.status === "OUT MISSING") dayStatus = "OUT MISSING";
         if (sess.status === "NO IN RECORD" && dayStatus === "NORMAL") dayStatus = "NO IN RECORD";
       }
