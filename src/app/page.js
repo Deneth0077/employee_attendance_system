@@ -541,13 +541,7 @@ export default function Home() {
                           <Download className="w-4 h-4" />
                           PDF
                         </button>
-                        <button
-                          onClick={downloadCSV}
-                          className="flex items-center gap-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-xl transition-colors text-sm font-medium border border-indigo-500/20"
-                        >
-                          <Download className="w-4 h-4" />
-                          CSV
-                        </button>
+
                       </div>
                     </div>
                     <div className="overflow-x-auto">
@@ -609,10 +603,10 @@ export default function Home() {
                               <td className="px-6 py-4 text-emerald-400 font-mono text-sm">{row.inTime}</td>
                               <td className="px-6 py-4 text-amber-400 font-mono text-sm">
                                 <div className="flex items-center gap-1.5">
+                                  {row.outTime}
                                   {row.isNextDayOut && (
                                     <span title="Clocked out next day" className="text-xs">🌙</span>
                                   )}
-                                  {row.outTime}
                                 </div>
                               </td>
                               <td className="px-6 py-4 text-center">
