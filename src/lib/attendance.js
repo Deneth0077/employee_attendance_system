@@ -102,11 +102,13 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
       if (currentIn) {
         // Found matching OUT for current session
         record.reportDate = currentIn.date;
+        const isNextDayOut = record.date !== currentIn.date;
         sessions.push({
           date: currentIn.date,
           in: currentIn,
           out: record,
-          status: "NORMAL"
+          status: "NORMAL",
+          isNextDayOut
         });
         currentIn = null;
       } else {
@@ -204,6 +206,8 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
     if (dayStatus === "NORMAL") totalNormalDays++;
     else if (dayStatus === "OUT MISSING") totalOutMissingDays++;
 
+    let dayIsNextDayOut = daySessions.some(sess => sess.isNextDayOut);
+
     dailyRecords.push({
       date,
       inTime: dayInTime,
@@ -211,6 +215,7 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
       totalHours: parseFloat(totalDayHours.toFixed(2)),
       scanCount: dayLogs.length,
       status: dayStatus,
+      isNextDayOut: dayIsNextDayOut,
       logs: dayLogs
     });
   });

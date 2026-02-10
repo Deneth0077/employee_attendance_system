@@ -22,6 +22,9 @@ import { Parser } from "json2csv";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import JSZip from "jszip";
+import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import "jspdf-autotable";
 
 function cn(...inputs) {
   return twMerge(clsx(inputs));
@@ -39,7 +42,9 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [tableFilter, setTableFilter] = useState(""); // New state for filtering the attendance table
   const [selectedDayLogs, setSelectedDayLogs] = useState(null);
+  const [selectedRows, setSelectedRows] = useState([]); // Array of dates selected for export
 
   const handleFileUpload = async (e) => {
     const selectedFile = e.target.files[0];
@@ -110,21 +115,22 @@ export default function Home() {
     const currentResult = results[activeResultIndex];
 
     try {
-      const records = currentResult.dailyRecords;
-      const data = records.map(r => ({
-        employeeId: currentResult.employeeId,
-        date: r.date,
-        inTime: r.inTime,
-        outTime: r.outTime,
-        totalHours: r.totalHours,
-        scanCount: r.scanCount,
-        status: r.status
+      const data = getExportData();
+      const csvData = data.map(r => ({
+        employeeId: r["Employee ID"],
+        date: r["Date"],
+        day: r["Day"],
+        inTime: r["IN Time"],
+        outTime: r["OUT Time"],
+        totalHours: r["Hours"],
+        scanCount: r["Scans"],
+        status: r["Status"]
       }));
 
       const parser = new Parser({
-        fields: ["employeeId", "date", "inTime", "outTime", "totalHours", "scanCount", "status"]
+        fields: ["employeeId", "date", "day", "inTime", "outTime", "totalHours", "scanCount", "status"]
       });
-      const csv = parser.parse(data);
+      const csv = parser.parse(csvData);
 
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
@@ -170,7 +176,98 @@ export default function Home() {
     link.click();
   };
 
+  const toggleRowSelection = (date) => {
+    setSelectedRows(prev =>
+      prev.includes(date) ? prev.filter(d => d !== date) : [...prev, date]
+    );
+  };
+
+  const selectAllRows = () => {
+    const currentResult = results[activeResultIndex];
+    if (!currentResult) return;
+    const allDates = currentResult.dailyRecords.map(r => r.date);
+    if (selectedRows.length === allDates.length) {
+      setSelectedRows([]);
+    } else {
+      setSelectedRows(allDates);
+    }
+  };
+
   const result = results[activeResultIndex];
+
+  const filteredDailyRecords = result?.dailyRecords.filter(row => {
+    if (!tableFilter) return true;
+    const dateObj = new Date(row.date);
+    const dayLong = dateObj.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+    const dayShort = dateObj.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    const query = tableFilter.toLowerCase();
+    return row.date.includes(query) || dayLong.includes(query) || dayShort.includes(query);
+  }) || [];
+
+  const getExportData = () => {
+    const currentResult = results[activeResultIndex];
+    if (!currentResult) return [];
+
+    // Prioritize selected rows, then filtered rows, then all records
+    let recordsToExport = [];
+    if (selectedRows.length > 0) {
+      recordsToExport = currentResult.dailyRecords.filter(r => selectedRows.includes(r.date));
+    } else if (tableFilter) {
+      recordsToExport = filteredDailyRecords;
+    } else {
+      recordsToExport = currentResult.dailyRecords;
+    }
+
+    return recordsToExport.map(r => ({
+      "Employee ID": currentResult.employeeId,
+      "Date": r.date,
+      "Day": new Date(r.date).toLocaleDateString("en-US", { weekday: "short" }),
+      "IN Time": r.inTime,
+      "OUT Time": r.outTime,
+      "Scans": r.scanCount,
+      "Hours": r.totalHours,
+      "Status": r.status
+    }));
+  };
+
+  const downloadExcel = () => {
+    const data = getExportData();
+    if (data.length === 0) return;
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Attendance");
+
+    const currentResult = results[activeResultIndex];
+    XLSX.writeFile(wb, `Attendance_${currentResult.employeeId}_${month}_${year}.xlsx`);
+  };
+
+  const downloadPDF = () => {
+    const data = getExportData();
+    if (data.length === 0) return;
+
+    const currentResult = results[activeResultIndex];
+    const doc = new jsPDF();
+
+    doc.setFontSize(18);
+    doc.text(`Attendance Report - Employee ${currentResult.employeeId}`, 14, 22);
+    doc.setFontSize(11);
+    doc.text(`Period: ${new Date(0, parseInt(month) - 1).toLocaleString('default', { month: 'long' })} ${year}`, 14, 30);
+
+    const tableColumn = Object.keys(data[0]);
+    const tableRows = data.map(item => Object.values(item));
+
+    doc.autoTable({
+      head: [tableColumn],
+      body: tableRows,
+      startY: 40,
+      theme: 'grid',
+      headStyles: { fillColor: [79, 70, 229] } // Indigo-600 color
+    });
+
+    doc.save(`Attendance_${currentResult.employeeId}_${month}_${year}.pdf`);
+  };
+
 
   return (
     <main className="min-h-screen gradient-bg py-12 px-4 sm:px-6 lg:px-8">
@@ -389,25 +486,37 @@ export default function Home() {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <SummaryCard
                       title="Total Days"
-                      value={result.summary.totalDaysWithRecords}
+                      value={tableFilter ? filteredDailyRecords.length : result.summary.totalDaysWithRecords}
                       icon={<Calendar className="w-5 h-5 text-blue-400" />}
                     />
                     <SummaryCard
                       title="Normal Days"
-                      value={result.summary.totalNormalDays}
+                      value={tableFilter ? filteredDailyRecords.filter(r => r.status === "NORMAL").length : result.summary.totalNormalDays}
                       icon={<CheckCircle2 className="w-5 h-5 text-green-400" />}
                     />
                     <SummaryCard
                       title="Missing OUT"
-                      value={result.summary.totalOutMissingDays}
+                      value={tableFilter ? filteredDailyRecords.filter(r => r.status === "OUT MISSING").length : result.summary.totalOutMissingDays}
                       icon={<AlertCircle className="w-5 h-5 text-red-400" />}
-                      highlight={result.summary.totalOutMissingDays > 0}
+                      highlight={(tableFilter ? filteredDailyRecords.filter(r => r.status === "OUT MISSING").length : result.summary.totalOutMissingDays) > 0}
                     />
                   </div>
 
                   <div className="glass-morphism rounded-3xl overflow-hidden">
                     <div className="p-6 border-b border-glass-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/5">
-                      <h3 className="text-xl font-semibold">Daily Attendance Log</h3>
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full sm:w-auto">
+                        <h3 className="text-xl font-semibold whitespace-nowrap">Daily Attendance Log</h3>
+                        <div className="relative w-full sm:w-64">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <input
+                            type="text"
+                            placeholder="Filter by day (e.g. Mon) or date..."
+                            className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
+                            value={tableFilter}
+                            onChange={(e) => setTableFilter(e.target.value)}
+                          />
+                        </div>
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         {results.length > 1 && (
                           <button
@@ -419,18 +528,48 @@ export default function Home() {
                           </button>
                         )}
                         <button
+                          onClick={downloadExcel}
+                          className="flex items-center gap-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-4 py-2 rounded-xl transition-colors text-sm font-medium border border-emerald-500/20"
+                        >
+                          <Download className="w-4 h-4" />
+                          Excel
+                        </button>
+                        <button
+                          onClick={downloadPDF}
+                          className="flex items-center gap-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 px-4 py-2 rounded-xl transition-colors text-sm font-medium border border-rose-500/20"
+                        >
+                          <Download className="w-4 h-4" />
+                          PDF
+                        </button>
+                        <button
                           onClick={downloadCSV}
                           className="flex items-center gap-2 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 px-4 py-2 rounded-xl transition-colors text-sm font-medium border border-indigo-500/20"
                         >
                           <Download className="w-4 h-4" />
-                          Download CSV
+                          CSV
                         </button>
                       </div>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left">
+                      <table className="w-full text-left border-collapse">
                         <thead>
-                          <tr className="bg-white/5 text-muted-foreground text-xs uppercase tracking-wider">
+                          <tr className="bg-white/5 text-muted-foreground text-[10px] uppercase tracking-wider">
+                            <th className="px-4 py-4 font-semibold text-center w-10">
+                              <input
+                                type="checkbox"
+                                className="accent-indigo-500 w-3.5 h-3.5 rounded border-glass-border bg-glass"
+                                checked={filteredDailyRecords.length > 0 && filteredDailyRecords.every(r => selectedRows.includes(r.date))}
+                                onChange={() => {
+                                  const allFilteredDates = filteredDailyRecords.map(r => r.date);
+                                  const areAllSelected = filteredDailyRecords.every(r => selectedRows.includes(r.date));
+                                  if (areAllSelected) {
+                                    setSelectedRows(prev => prev.filter(d => !allFilteredDates.includes(d)));
+                                  } else {
+                                    setSelectedRows(prev => [...new Set([...prev, ...allFilteredDates])]);
+                                  }
+                                }}
+                              />
+                            </th>
                             <th className="px-6 py-4 font-semibold">Date</th>
                             <th className="px-6 py-4 font-semibold">IN Time</th>
                             <th className="px-6 py-4 font-semibold">OUT Time</th>
@@ -440,17 +579,42 @@ export default function Home() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-glass-border">
-                          {result.dailyRecords.map((row, idx) => (
+                          {filteredDailyRecords.map((row, idx) => (
                             <motion.tr
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
                               transition={{ delay: idx * 0.05 }}
                               key={row.date}
-                              className="hover:bg-white/5 transition-colors"
+                              className={cn(
+                                "hover:bg-white/5 transition-colors group",
+                                selectedRows.includes(row.date) && "bg-indigo-500/5"
+                              )}
                             >
-                              <td className="px-6 py-4 font-medium">{row.date}</td>
-                              <td className="px-6 py-4 text-emerald-400 font-mono">{row.inTime}</td>
-                              <td className="px-6 py-4 text-orange-400 font-mono">{row.outTime}</td>
+                              <td className="px-4 py-4 text-center">
+                                <input
+                                  type="checkbox"
+                                  className="accent-indigo-500 w-3.5 h-3.5 rounded border-glass-border bg-glass"
+                                  checked={selectedRows.includes(row.date)}
+                                  onChange={() => toggleRowSelection(row.date)}
+                                />
+                              </td>
+                              <td className="px-6 py-4 font-medium">
+                                <div className="flex flex-col">
+                                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-tighter leading-none mb-1">
+                                    {new Date(row.date).toLocaleDateString('en-US', { weekday: 'short' })}
+                                  </span>
+                                  <span className="text-sm">{row.date}</span>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-emerald-400 font-mono text-sm">{row.inTime}</td>
+                              <td className="px-6 py-4 text-amber-400 font-mono text-sm">
+                                <div className="flex items-center gap-1.5">
+                                  {row.isNextDayOut && (
+                                    <span title="Clocked out next day" className="text-xs">🌙</span>
+                                  )}
+                                  {row.outTime}
+                                </div>
+                              </td>
                               <td className="px-6 py-4 text-center">
                                 <button
                                   onClick={() => setSelectedDayLogs({ date: row.date, logs: row.logs })}
@@ -459,7 +623,7 @@ export default function Home() {
                                   {row.scanCount}
                                 </button>
                               </td>
-                              <td className="px-6 py-4 font-semibold text-center">
+                              <td className="px-6 py-4 font-semibold text-center text-sm">
                                 {typeof row.totalHours === 'number' ? `${row.totalHours}h` : '--'}
                               </td>
                               <td className="px-6 py-4">
@@ -508,13 +672,13 @@ export default function Home() {
                       <div className="flex items-center gap-3">
                         <div className={cn(
                           "w-2 h-2 rounded-full",
-                          log.type === "IN" ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" : "bg-orange-400 shadow-[0_0_8px_rgba(251,146,60,0.5)]"
+                          log.type === "IN" ? "bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" : "bg-amber-400 shadow-[0_0_8px_rgba(251,146,60,0.5)]"
                         )} />
                         <span className="font-mono text-lg font-medium tracking-tight">{log.displayTime}</span>
                         <div className="flex gap-1.5">
                           <span className={cn(
                             "text-[9px] font-bold px-1.5 py-0.5 rounded-md",
-                            log.type === "IN" ? "text-emerald-400 bg-emerald-400/10" : "text-orange-400 bg-orange-400/10"
+                            log.type === "IN" ? "text-emerald-400 bg-emerald-400/10" : "text-amber-400 bg-amber-400/10"
                           )}>
                             {log.type}
                           </span>
