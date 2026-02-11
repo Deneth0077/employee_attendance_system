@@ -24,7 +24,22 @@ import { twMerge } from "tailwind-merge";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
-import "jspdf-autotable";
+import autoTable from "jspdf-autotable";
+
+const formatDuration = (hours) => {
+  if (typeof hours !== "number") return "--";
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+
+  // Handle case where rounding minutes makes it 60
+  const finalH = m === 60 ? h + 1 : h;
+  const finalM = m === 60 ? 0 : m;
+
+  if (finalH === 0 && finalM === 0) return "0h 0m";
+  if (finalH === 0) return `${finalM}m`;
+  if (finalM === 0) return `${finalH}h`;
+  return `${finalH}h ${finalM}m`;
+};
 
 function cn(...inputs) {
   return twMerge(clsx(inputs));
@@ -156,7 +171,7 @@ export default function Home() {
         date: r.date,
         inTime: r.inTime,
         outTime: r.outTime,
-        totalHours: r.totalHours,
+        totalHours: formatDuration(r.totalHours),
         scanCount: r.scanCount,
         status: r.status
       }));
@@ -225,7 +240,7 @@ export default function Home() {
       "IN Time": r.inTime,
       "OUT Time": r.outTime,
       "Scans": r.scanCount,
-      "Hours": r.totalHours,
+      "Hours": formatDuration(r.totalHours),
       "Status": r.status
     }));
   };
@@ -257,7 +272,7 @@ export default function Home() {
     const tableColumn = Object.keys(data[0]);
     const tableRows = data.map(item => Object.values(item));
 
-    doc.autoTable({
+    autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
       startY: 40,
@@ -618,7 +633,7 @@ export default function Home() {
                                 </button>
                               </td>
                               <td className="px-6 py-4 font-semibold text-center text-sm">
-                                {typeof row.totalHours === 'number' ? `${row.totalHours}h` : '--'}
+                                {typeof row.totalHours === 'number' ? formatDuration(row.totalHours) : '--'}
                               </td>
                               <td className="px-6 py-4">
                                 <StatusBadge status={row.status} />
