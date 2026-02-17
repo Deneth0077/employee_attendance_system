@@ -306,14 +306,13 @@ export default function Home() {
       doc.setFontSize(11);
       doc.text(`Period: ${exportStartDate} to ${exportEndDate}`, 14, 30);
 
-      const tableColumn = ["Date", "IN Time", "OUT Time", "Scans", "Hours", "Status"];
+      const tableColumn = ["Date", "IN Time", "OUT Time", "Scans", "Scan Log"];
       const tableRows = rangeResult.dailyRecords.map(r => [
         r.date,
         r.inTime,
         r.outTime,
         r.scanCount,
-        formatDuration(r.totalHours),
-        r.status
+        { content: r.logs.map(l => l.time).join(', '), logs: r.logs }
       ]);
 
       autoTable(doc, {
@@ -330,6 +329,38 @@ export default function Home() {
             if (data.column.index === 2) { // OUT Time column
               data.cell.styles.textColor = [255, 0, 0]; // Red
             }
+            if (data.column.index === 4) { // Scan Log column
+              data.cell.styles.textColor = [255, 255, 255]; // Hide default text
+            }
+          }
+        },
+        didDrawCell: function (data) {
+          if (data.section === 'body' && data.column.index === 4) {
+            const logs = data.cell.raw.logs;
+            if (!logs) return;
+
+            const x = data.cell.x;
+            const y = data.cell.y;
+
+            // Approximate padding if available or hardcode
+            let currentX = x + 2;
+            let currentY = y + (data.cell.height / 1.5);
+
+            logs.forEach((log, index) => {
+              // Set color
+              if (log.type === 'IN') doc.setTextColor(0, 128, 0); // Green
+              else doc.setTextColor(255, 0, 0); // Red
+
+              doc.text(log.time, currentX, currentY);
+              currentX += doc.getTextWidth(log.time);
+
+              // Draw separator if not last
+              if (index < logs.length - 1) {
+                doc.setTextColor(0, 0, 0); // Black for comma
+                doc.text(', ', currentX, currentY);
+                currentX += doc.getTextWidth(', ');
+              }
+            });
           }
         }
       });
