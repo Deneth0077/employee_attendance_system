@@ -17,7 +17,7 @@ import {
   ChevronDown,
   Search
 } from "lucide-react";
-import { analyzeAttendance, getEmployeeIds } from "@/lib/attendance";
+import { analyzeAttendance, analyzeAttendanceRange, getEmployeeIds } from "@/lib/attendance";
 import { Parser } from "json2csv";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -60,6 +60,9 @@ export default function Home() {
   const [tableFilter, setTableFilter] = useState(""); // New state for filtering the attendance table
   const [selectedDayLogs, setSelectedDayLogs] = useState(null);
   const [selectedRows, setSelectedRows] = useState([]); // Array of dates selected for export
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState("");
+  const [exportEndDate, setExportEndDate] = useState("");
 
   const handleFileUpload = async (e) => {
     const selectedFile = e.target.files[0];
@@ -281,6 +284,62 @@ export default function Home() {
     });
 
     doc.save(`Attendance_${currentResult.employeeId}_${month}_${year}.pdf`);
+  };
+
+  const handleRangeExport = async () => {
+    if (!file || !exportStartDate || !exportEndDate) return;
+
+    try {
+      const text = await file.text();
+      const currentResult = results[activeResultIndex];
+      const rangeResult = analyzeAttendanceRange(text, currentResult.employeeId, exportStartDate, exportEndDate);
+
+      if (rangeResult.dailyRecords.length === 0) {
+        alert("No records found for this date range.");
+        return;
+      }
+
+      const doc = new jsPDF();
+
+      doc.setFontSize(18);
+      doc.text(`Attendance Report - Employee ${currentResult.employeeId}`, 14, 22);
+      doc.setFontSize(11);
+      doc.text(`Period: ${exportStartDate} to ${exportEndDate}`, 14, 30);
+
+      const tableColumn = ["Date", "IN Time", "OUT Time", "Scans", "Hours", "Status"];
+      const tableRows = rangeResult.dailyRecords.map(r => [
+        r.date,
+        r.inTime,
+        r.outTime,
+        r.scanCount,
+        formatDuration(r.totalHours),
+        r.status
+      ]);
+
+      autoTable(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 40,
+        theme: 'grid',
+        headStyles: { fillColor: [79, 70, 229] },
+        didParseCell: function (data) {
+          if (data.section === 'body') {
+            if (data.column.index === 1) { // IN Time column
+              data.cell.styles.textColor = [0, 128, 0]; // Green
+            }
+            if (data.column.index === 2) { // OUT Time column
+              data.cell.styles.textColor = [255, 0, 0]; // Red
+            }
+          }
+        }
+      });
+
+      doc.save(`Attendance_${currentResult.employeeId}_${exportStartDate}_to_${exportEndDate}.pdf`);
+      setShowExportModal(false);
+    } catch (err) {
+      console.error("Export failed", err);
+      alert("Failed to generate report.");
+    }
   };
 
 
@@ -533,6 +592,15 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
+                        {results.length > 0 && (
+                          <button
+                            onClick={() => setShowExportModal(true)}
+                            className="flex items-center gap-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 px-4 py-2 rounded-xl transition-colors text-sm font-medium border border-blue-500/20"
+                          >
+                            <Calendar className="w-4 h-4" />
+                            Export Range
+                          </button>
+                        )}
                         {results.length > 1 && (
                           <button
                             onClick={downloadAllAsZip}
@@ -711,6 +779,61 @@ export default function Home() {
                 className="w-full mt-8 bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl transition-all"
               >
                 Close
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showExportModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="glass-morphism rounded-3xl p-8 max-w-sm w-full border border-glass-border shadow-2xl space-y-6"
+            >
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold text-white">Export Range</h3>
+                <button
+                  onClick={() => setShowExportModal(false)}
+                  className="p-2 hover:bg-white/10 rounded-xl transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-muted-foreground">Start Date</label>
+                  <input
+                    type="date"
+                    className="w-full bg-glass border border-glass-border rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 cursor-pointer"
+                    value={exportStartDate}
+                    onChange={(e) => setExportStartDate(e.target.value)}
+                    onClick={(e) => e.target.showPicker && e.target.showPicker()}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-muted-foreground">End Date</label>
+                  <input
+                    type="date"
+                    className="w-full bg-glass border border-glass-border rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 cursor-pointer"
+                    value={exportEndDate}
+                    onChange={(e) => setExportEndDate(e.target.value)}
+                    onClick={(e) => e.target.showPicker && e.target.showPicker()}
+                  />
+                </div>
+              </div>
+
+              <button
+                onClick={handleRangeExport}
+                className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
+              >
+                <Download className="w-5 h-5" />
+                Download PDF
               </button>
             </motion.div>
           </div>

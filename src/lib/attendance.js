@@ -23,27 +23,9 @@ export function getEmployeeIds(fileText) {
   });
 }
 
-/**
- * Analyzes biometric attendance log data and generates a structured report.
- * 
- * Data Format: EmployeeID Date Time VerifyMode InOutStatus WorkCode Reserved
- * Column meanings:
- * - EmployeeID: Worker ID
- * - Date: Attendance date (YYYY-MM-DD)
- * - Time: Scan time (HH:MM:SS)
- * - InOutStatus: 0 means IN, 1 means OUT
- */
-/**
- * Analyzes biometric attendance log data and generates a structured report.
- * 
- * Data Format: EmployeeID Date Time VerifyMode InOutStatus WorkCode Reserved
- * Column meanings:
- * - EmployeeID: Worker ID
- * - Date: Attendance date (YYYY-MM-DD)
- * - Time: Scan time (HH:MM:SS)
- * - InOutStatus: 0 means IN, 1 means OUT
- */
-export function analyzeAttendance(fileText, employeeId, month, year) {
+
+
+function getEmployeeData(fileText, employeeId) {
   const lines = fileText.trim().split('\n');
   const allEmployeeRecords = [];
 
@@ -67,6 +49,10 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
   // 2. Sort records chronologically
   allEmployeeRecords.sort((a, b) => a.dateTime - b.dateTime);
 
+  return { allEmployeeRecords, sessions: generateSessions(allEmployeeRecords) };
+}
+
+function generateSessions(allEmployeeRecords) {
   // 2.5 Identify Double Taps & 3. Pair Sessions
   let lastValid = null;
   let currentIn = null;
@@ -138,6 +124,22 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
       status: "OUT MISSING"
     });
   }
+  return sessions;
+}
+
+/**
+ * Analyzes biometric attendance log data and generates a structured report.
+ * 
+ * Data Format: EmployeeID Date Time VerifyMode InOutStatus WorkCode Reserved
+ * Column meanings:
+ * - EmployeeID: Worker ID
+ * - Date: Attendance date (YYYY-MM-DD)
+ * - Time: Scan time (HH:MM:SS)
+ * - InOutStatus: 0 means IN, 1 means OUT
+ */
+export function analyzeAttendance(fileText, employeeId, month, year) {
+  const { allEmployeeRecords, sessions } = getEmployeeData(fileText, employeeId);
+
 
   // 4. Filter sessions by requested month and year (based on the session/report date)
   const filteredSessions = sessions.filter(s => {
@@ -145,6 +147,28 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
     return sMonth === parseInt(month) && sYear === parseInt(year);
   });
 
+  return generateReport(filteredSessions, allEmployeeRecords, employeeId, month, year);
+}
+
+export function analyzeAttendanceRange(fileText, employeeId, startDate, endDate) {
+  const { allEmployeeRecords, sessions } = getEmployeeData(fileText, employeeId);
+
+  // Create Date objects for comparison
+  const start = new Date(startDate);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  end.setHours(23, 59, 59, 999);
+
+  // Filter sessions by date range
+  const filteredSessions = sessions.filter(s => {
+    const sessionDate = new Date(s.date);
+    return sessionDate >= start && sessionDate <= end;
+  });
+
+  return generateReport(filteredSessions, allEmployeeRecords, employeeId, "Range", "Report");
+}
+
+function generateReport(filteredSessions, allEmployeeRecords, employeeId, month, year) {
   // 5. Group by Date for the daily report
   const dailyGroups = filteredSessions.reduce((acc, sess) => {
     if (!acc[sess.date]) acc[sess.date] = [];
