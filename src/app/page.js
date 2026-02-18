@@ -322,12 +322,23 @@ export default function Home() {
           outDisplay = `${dateStr} ${formatTime12h(d)}`;
         }
 
+        const processedLogs = r.logs.map((log, i, arr) => {
+          const [timeNum, period] = log.displayTime.split(' ');
+          const nextLog = arr[i + 1];
+          const nextPeriod = nextLog ? nextLog.displayTime.split(' ')[1] : null;
+
+          return {
+            ...log,
+            printTime: (nextPeriod === period) ? timeNum : log.displayTime
+          };
+        });
+
         return [
           r.date,
           inDisplay,
           outDisplay,
           r.scanCount,
-          { content: r.logs.map(l => l.time).join(', '), logs: r.logs }
+          { content: processedLogs.map(l => l.printTime).join(', '), logs: processedLogs }
         ];
       });
 
@@ -367,8 +378,8 @@ export default function Home() {
               if (log.type === 'IN') doc.setTextColor(0, 128, 0); // Green
               else doc.setTextColor(255, 0, 0); // Red
 
-              doc.text(log.time, currentX, currentY);
-              currentX += doc.getTextWidth(log.time);
+              doc.text(log.printTime, currentX, currentY);
+              currentX += doc.getTextWidth(log.printTime);
 
               // Draw separator if not last
               if (index < logs.length - 1) {
