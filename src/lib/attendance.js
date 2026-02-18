@@ -208,12 +208,19 @@ function generateReport(filteredSessions, allEmployeeRecords, employeeId, month,
       isDuplicate: r.isDuplicate
     })).sort((a, b) => a.dateTime - b.dateTime);
 
+    let dayInDateTime = null;
+    let dayOutDateTime = null;
+
     daySessions.forEach(sess => {
       if (sess.in) {
-        if (dayInTime === "-") dayInTime = sess.in.time.substring(0, 5);
+        if (dayInTime === "-") {
+          dayInTime = sess.in.time.substring(0, 5);
+          dayInDateTime = sess.in.dateTime;
+        }
       }
       if (sess.out) {
         dayOutTime = sess.out.time.substring(0, 5);
+        dayOutDateTime = sess.out.dateTime;
       }
 
       if (sess.status === "NORMAL" && sess.in && sess.out) {
@@ -236,6 +243,8 @@ function generateReport(filteredSessions, allEmployeeRecords, employeeId, month,
       date,
       inTime: dayInTime,
       outTime: dayOutTime,
+      inDateTime: dayInDateTime,
+      outDateTime: dayOutDateTime,
       totalHours: parseFloat(totalDayHours.toFixed(2)),
       scanCount: dayLogs.length,
       status: dayStatus,

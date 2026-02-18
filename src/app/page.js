@@ -307,13 +307,29 @@ export default function Home() {
       doc.text(`Period: ${exportStartDate} to ${exportEndDate}`, 14, 30);
 
       const tableColumn = ["Date", "IN Time", "OUT Time", "Scans", "Scan Log"];
-      const tableRows = rangeResult.dailyRecords.map(r => [
-        r.date,
-        r.inTime,
-        r.outTime,
-        r.scanCount,
-        { content: r.logs.map(l => l.time).join(', '), logs: r.logs }
-      ]);
+      const formatTime12h = (d) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+
+      const tableRows = rangeResult.dailyRecords.map(r => {
+        let inDisplay = r.inTime;
+        if (r.inDateTime) {
+          inDisplay = formatTime12h(r.inDateTime);
+        }
+
+        let outDisplay = r.outTime;
+        if (r.outDateTime) {
+          const d = r.outDateTime;
+          const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          outDisplay = `${dateStr} ${formatTime12h(d)}`;
+        }
+
+        return [
+          r.date,
+          inDisplay,
+          outDisplay,
+          r.scanCount,
+          { content: r.logs.map(l => l.time).join(', '), logs: r.logs }
+        ];
+      });
 
       autoTable(doc, {
         head: [tableColumn],
