@@ -251,16 +251,53 @@ export default function Home() {
     }));
   };
 
+  const getExportAllData = () => {
+    let combinedExport = [];
+
+    results.forEach(res => {
+      // Apply similar tableFilter if you desired, otherwise export all original records for the selected workers.
+      let recordsToExport = res.dailyRecords;
+      if (selectedRows.length > 0) {
+        recordsToExport = res.dailyRecords.filter(r => selectedRows.includes(r.date));
+      } else if (tableFilter) {
+        recordsToExport = res.dailyRecords.filter(row => {
+          const dateObj = new Date(row.date);
+          const dayLong = dateObj.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+          const dayShort = dateObj.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+          const query = tableFilter.toLowerCase();
+          return row.date.includes(query) || dayLong.includes(query) || dayShort.includes(query);
+        });
+      }
+
+      const rows = recordsToExport.map(r => ({
+        "Employee ID": res.employeeId,
+        "Date": r.date,
+        "Day": new Date(r.date).toLocaleDateString("en-US", { weekday: "short" }),
+        "IN Time": r.inTime,
+        "OUT Time": r.outTime,
+        "Scans": r.scanCount,
+        "Hours": formatDuration(r.totalHours),
+        "Net Hours": formatDuration(r.netHours),
+        "Status": r.status
+      }));
+
+      combinedExport = combinedExport.concat(rows);
+    });
+
+    return combinedExport;
+  };
+
   const downloadExcel = () => {
-    const data = getExportData();
+    const data = getExportAllData(); // Now exports all processed results
     if (data.length === 0) return;
 
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Attendance");
+    XLSX.utils.book_append_sheet(wb, ws, "Attendance_All");
 
-    const currentResult = results[activeResultIndex];
-    XLSX.writeFile(wb, `Attendance_${currentResult.employeeId}_${month}_${year}.xlsx`);
+    // Output naming includes "All" since multiple users might exist
+    const fileName = results.length > 1 ? `Attendance_Multiple_Users_${month}_${year}.xlsx` : `Attendance_${results[0].employeeId}_${month}_${year}.xlsx`;
+    XLSX.writeFile(wb, fileName);
   };
 
   const downloadPDF = () => {
