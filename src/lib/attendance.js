@@ -140,14 +140,22 @@ function generateSessions(allEmployeeRecords) {
 export function analyzeAttendance(fileText, employeeId, month, year) {
   const { allEmployeeRecords, sessions } = getEmployeeData(fileText, employeeId);
 
+  const m = parseInt(month);
+  const y = parseInt(year);
+  const dateObj = new Date(y, m - 1, 1);
+  const allExpectedDates = [];
+  while (dateObj.getMonth() === m - 1) {
+    allExpectedDates.push(`${y}-${String(m).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`);
+    dateObj.setDate(dateObj.getDate() + 1);
+  }
 
   // 4. Filter sessions by requested month and year (based on the session/report date)
   const filteredSessions = sessions.filter(s => {
     const [sYear, sMonth] = s.date.split('-').map(Number);
-    return sMonth === parseInt(month) && sYear === parseInt(year);
+    return sMonth === m && sYear === y;
   });
 
-  return generateReport(filteredSessions, allEmployeeRecords, employeeId, month, year);
+  return generateReport(filteredSessions, allEmployeeRecords, employeeId, month, year, allExpectedDates);
 }
 
 export function analyzeAttendanceRange(fileText, employeeId, startDate, endDate) {
@@ -159,16 +167,27 @@ export function analyzeAttendanceRange(fileText, employeeId, startDate, endDate)
   const end = new Date(endDate);
   end.setHours(23, 59, 59, 999);
 
+  const allExpectedDates = [];
+  const curr = new Date(start);
+  curr.setHours(0, 0, 0, 0);
+  const endDay = new Date(endDate);
+  endDay.setHours(0, 0, 0, 0);
+
+  while (curr <= endDay) {
+    allExpectedDates.push(`${curr.getFullYear()}-${String(curr.getMonth() + 1).padStart(2, '0')}-${String(curr.getDate()).padStart(2, '0')}`);
+    curr.setDate(curr.getDate() + 1);
+  }
+
   // Filter sessions by date range
   const filteredSessions = sessions.filter(s => {
     const sessionDate = new Date(s.date);
     return sessionDate >= start && sessionDate <= end;
   });
 
-  return generateReport(filteredSessions, allEmployeeRecords, employeeId, "Range", "Report");
+  return generateReport(filteredSessions, allEmployeeRecords, employeeId, "Range", "Report", allExpectedDates);
 }
 
-function generateReport(filteredSessions, allEmployeeRecords, employeeId, month, year) {
+function generateReport(filteredSessions, allEmployeeRecords, employeeId, month, year, allExpectedDates) {
   // 5. Group by Date for the daily report
   const dailyGroups = filteredSessions.reduce((acc, sess) => {
     if (!acc[sess.date]) acc[sess.date] = [];
@@ -179,16 +198,26 @@ function generateReport(filteredSessions, allEmployeeRecords, employeeId, month,
   const dailyRecords = [];
   let totalOutMissingDays = 0;
   let totalNormalDays = 0;
+  let totalAbsentDays = 0;
 
-  const sortedDates = Object.keys(dailyGroups).sort();
+  let sortedDates;
+  if (allExpectedDates && allExpectedDates.length > 0) {
+    sortedDates = allExpectedDates;
+  } else {
+    sortedDates = Object.keys(dailyGroups).sort();
+  }
 
   sortedDates.forEach(date => {
-    const daySessions = dailyGroups[date];
+    const daySessions = dailyGroups[date] || [];
 
     let totalDayHours = 0;
     let dayInTime = "-";
     let dayOutTime = "-";
-    let dayStatus = "NORMAL";
+    let dayStatus = "ABSENT";
+
+    if (daySessions.length > 0) {
+      dayStatus = "NORMAL";
+    }
 
     const formatTime = (dateObj) => {
       return dateObj.toLocaleTimeString('en-US', {
@@ -236,6 +265,7 @@ function generateReport(filteredSessions, allEmployeeRecords, employeeId, month,
 
     if (dayStatus === "NORMAL") totalNormalDays++;
     else if (dayStatus === "OUT MISSING") totalOutMissingDays++;
+    else if (dayStatus === "ABSENT") totalAbsentDays++;
 
     let dayIsNextDayOut = daySessions.some(sess => sess.isNextDayOut);
 
@@ -245,7 +275,8 @@ function generateReport(filteredSessions, allEmployeeRecords, employeeId, month,
       outTime: dayOutTime,
       inDateTime: dayInDateTime,
       outDateTime: dayOutDateTime,
-      totalHours: parseFloat(totalDayHours.toFixed(2)),
+      totalHours: totalDayHours > 0 ? parseFloat(totalDayHours.toFixed(2)) : 0,
+      netHours: totalDayHours > 0 ? Math.max(0, Math.round(totalDayHours) - 1) : 0,
       scanCount: dayLogs.length,
       status: dayStatus,
       isNextDayOut: dayIsNextDayOut,
@@ -258,7 +289,9 @@ function generateReport(filteredSessions, allEmployeeRecords, employeeId, month,
     month,
     year,
     summary: {
-      totalDaysWithRecords: dailyRecords.length,
+      totalDays: sortedDates.length,
+      totalDaysWithRecords: (dailyRecords.length - totalAbsentDays),
+      totalAbsentDays,
       totalOutMissingDays,
       totalNormalDays
     },

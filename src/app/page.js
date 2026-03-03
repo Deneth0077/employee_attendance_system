@@ -141,12 +141,13 @@ export default function Home() {
         inTime: r["IN Time"],
         outTime: r["OUT Time"],
         totalHours: r["Hours"],
+        netHours: r["Net Hours"],
         scanCount: r["Scans"],
         status: r["Status"]
       }));
 
       const parser = new Parser({
-        fields: ["employeeId", "date", "day", "inTime", "outTime", "totalHours", "scanCount", "status"]
+        fields: ["employeeId", "date", "day", "inTime", "outTime", "totalHours", "netHours", "scanCount", "status"]
       });
       const csv = parser.parse(csvData);
 
@@ -175,12 +176,13 @@ export default function Home() {
         inTime: r.inTime,
         outTime: r.outTime,
         totalHours: formatDuration(r.totalHours),
+        netHours: formatDuration(r.netHours),
         scanCount: r.scanCount,
         status: r.status
       }));
 
       const parser = new Parser({
-        fields: ["employeeId", "date", "inTime", "outTime", "totalHours", "scanCount", "status"]
+        fields: ["employeeId", "date", "inTime", "outTime", "totalHours", "netHours", "scanCount", "status"]
       });
       const csv = parser.parse(data);
       folder.file(`Attendance_${res.employeeId}_${month}_${year}.csv`, csv);
@@ -244,6 +246,7 @@ export default function Home() {
       "OUT Time": r.outTime,
       "Scans": r.scanCount,
       "Hours": formatDuration(r.totalHours),
+      "Net Hours": formatDuration(r.netHours),
       "Status": r.status
     }));
   };
@@ -354,7 +357,7 @@ export default function Home() {
               data.cell.styles.textColor = [0, 128, 0]; // Green
             }
             if (data.column.index === 2) { // OUT Time column
-              data.cell.styles.textColor = [255, 0, 0]; // Red
+              data.cell.styles.textColor = [255, 255, 255]; // Hide for custom draw
             }
             if (data.column.index === 4) { // Scan Log column
               data.cell.styles.textColor = [255, 255, 255]; // Hide default text
@@ -362,6 +365,28 @@ export default function Home() {
           }
         },
         didDrawCell: function (data) {
+          if (data.section === 'body' && data.column.index === 2) {
+            const text = String(data.cell.raw);
+            const x = data.cell.x + 2;
+            const y = data.cell.y + (data.cell.height / 1.5);
+
+            if (text && text.includes(' ')) {
+              const firstSpace = text.indexOf(' ');
+              const datePart = text.substring(0, firstSpace);
+              const timePart = text.substring(firstSpace + 1);
+
+              doc.setTextColor(0, 0, 0); // Black Date
+              doc.text(datePart, x, y);
+
+              const dw = doc.getTextWidth(datePart);
+              doc.setTextColor(255, 0, 0); // Red Time
+              doc.text(timePart, x + dw + 1, y);
+            } else {
+              doc.setTextColor(255, 0, 0); // Red
+              doc.text(text, x, y);
+            }
+          }
+
           if (data.section === 'body' && data.column.index === 4) {
             const logs = data.cell.raw.logs;
             if (!logs) return;
@@ -615,16 +640,21 @@ export default function Home() {
                   )}
 
                   {/* Summary Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                     <SummaryCard
                       title="Total Days"
-                      value={tableFilter ? filteredDailyRecords.length : result.summary.totalDaysWithRecords}
+                      value={tableFilter ? filteredDailyRecords.length : result.summary.totalDays}
                       icon={<Calendar className="w-5 h-5 text-blue-400" />}
                     />
                     <SummaryCard
-                      title="Normal Days"
-                      value={tableFilter ? filteredDailyRecords.filter(r => r.status === "NORMAL").length : result.summary.totalNormalDays}
-                      icon={<CheckCircle2 className="w-5 h-5 text-green-400" />}
+                      title="Present Days"
+                      value={tableFilter ? filteredDailyRecords.filter(r => r.status !== "ABSENT").length : result.summary.totalDaysWithRecords}
+                      icon={<CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+                    />
+                    <SummaryCard
+                      title="Absent Days"
+                      value={tableFilter ? filteredDailyRecords.filter(r => r.status === "ABSENT").length : result.summary.totalAbsentDays}
+                      icon={<AlertCircle className="w-5 h-5 text-gray-400" />}
                     />
                     <SummaryCard
                       title="Missing OUT"
@@ -710,6 +740,7 @@ export default function Home() {
                             <th className="px-6 py-4 font-semibold">OUT Time</th>
                             <th className="px-6 py-4 font-semibold text-center">Scans</th>
                             <th className="px-6 py-4 font-semibold text-center">Hours</th>
+                            <th className="px-6 py-4 font-semibold text-center">Net Hours</th>
                             <th className="px-6 py-4 font-semibold">Status</th>
                           </tr>
                         </thead>
@@ -760,6 +791,9 @@ export default function Home() {
                               </td>
                               <td className="px-6 py-4 font-semibold text-center text-sm">
                                 {typeof row.totalHours === 'number' ? formatDuration(row.totalHours) : '--'}
+                              </td>
+                              <td className="px-6 py-4 font-semibold text-center text-sm">
+                                {typeof row.netHours === 'number' ? formatDuration(row.netHours) : '--'}
                               </td>
                               <td className="px-6 py-4">
                                 <StatusBadge status={row.status} />
@@ -922,7 +956,8 @@ function StatusBadge({ status }) {
   const styles = {
     "NORMAL": "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
     "OUT MISSING": "bg-red-500/10 text-red-400 border-red-500/20",
-    "NO IN RECORD": "bg-amber-500/10 text-amber-400 border-amber-500/20"
+    "NO IN RECORD": "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    "ABSENT": "bg-gray-500/10 text-gray-400 border-gray-500/20"
   };
 
   return (
