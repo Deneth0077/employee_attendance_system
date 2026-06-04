@@ -62,6 +62,7 @@ export default function Home() {
   const [employeeId, setEmployeeId] = useState(""); // Kept for backward compatibility/single input if needed
   const [availableEmployees, setAvailableEmployees] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState([]);
+  const [selectedEmployeesNet, setSelectedEmployeesNet] = useState([]);
   const [month, setMonth] = useState(new Date().getMonth() + 1 + "");
   const [year, setYear] = useState(new Date().getFullYear() + "");
   const [results, setResults] = useState([]); // Changed from 'result' to 'results'
@@ -92,9 +93,11 @@ export default function Home() {
         const ids = getEmployeeIds(text);
         setAvailableEmployees(ids);
         
-        // Find default employees that are actually available in the uploaded file
+        // Detailed Analyzer defaults to empty (no auto-selected employees)
+        setSelectedEmployees([]);
+        // Bulk Net Hours Exporter defaults to matching DEFAULT_EMPLOYEE_LIST
         const defaultSelected = DEFAULT_EMPLOYEE_LIST.filter(id => ids.includes(id));
-        setSelectedEmployees(defaultSelected);
+        setSelectedEmployeesNet(defaultSelected);
         setBulkPasteInput(defaultSelected.join("\n"));
       } catch (err) {
         setError("Error reading file.");
@@ -103,25 +106,39 @@ export default function Home() {
   };
 
   const toggleEmployeeSelection = (id) => {
-    setSelectedEmployees(prev => {
-      const next = prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id];
-      setBulkPasteInput(next.join("\n"));
-      return next;
-    });
+    if (activeTab === "analyzer") {
+      setSelectedEmployees(prev => {
+        return prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id];
+      });
+    } else {
+      setSelectedEmployeesNet(prev => {
+        const next = prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id];
+        setBulkPasteInput(next.join("\n"));
+        return next;
+      });
+    }
   };
 
   const selectAllEmployees = () => {
-    if (selectedEmployees.length === availableEmployees.length) {
-      setSelectedEmployees([]);
-      setBulkPasteInput("");
+    if (activeTab === "analyzer") {
+      if (selectedEmployees.length === availableEmployees.length) {
+        setSelectedEmployees([]);
+      } else {
+        setSelectedEmployees([...availableEmployees]);
+      }
     } else {
-      setSelectedEmployees([...availableEmployees]);
-      setBulkPasteInput(availableEmployees.join("\n"));
+      if (selectedEmployeesNet.length === availableEmployees.length) {
+        setSelectedEmployeesNet([]);
+        setBulkPasteInput("");
+      } else {
+        setSelectedEmployeesNet([...availableEmployees]);
+        setBulkPasteInput(availableEmployees.join("\n"));
+      }
     }
   };
 
   const handleClearList = () => {
-    setSelectedEmployees([]);
+    setSelectedEmployeesNet([]);
     setBulkPasteInput("");
   };
 
@@ -134,7 +151,7 @@ export default function Home() {
       return;
     }
 
-    setSelectedEmployees(prev => {
+    setSelectedEmployeesNet(prev => {
       if (prev.includes(trimmed)) return prev;
       const next = [...prev, trimmed];
       setBulkPasteInput(next.join("\n"));
@@ -146,7 +163,7 @@ export default function Home() {
   const handleBulkIdPaste = (val) => {
     setBulkPasteInput(val);
     if (val.trim() === "") {
-      setSelectedEmployees([]);
+      setSelectedEmployeesNet([]);
       return;
     }
     const parsedIds = val.replace(/,/g, ' ')
@@ -155,7 +172,7 @@ export default function Home() {
       .filter(id => id !== "");
     
     const validIds = parsedIds.filter(id => availableEmployees.includes(id));
-    setSelectedEmployees(validIds);
+    setSelectedEmployeesNet(validIds);
   };
 
   const downloadSingleEmployeeNetHoursExcel = (empId) => {
@@ -229,8 +246,8 @@ export default function Home() {
   };
 
   const exportSummaries = useMemo(() => {
-    if (!fileText || selectedEmployees.length === 0) return [];
-    return selectedEmployees.map(id => {
+    if (!fileText || selectedEmployeesNet.length === 0) return [];
+    return selectedEmployeesNet.map(id => {
       const report = analyzeAttendance(fileText, id, month, year);
       const totalNetHours = report.dailyRecords.reduce((sum, r) => sum + (r.netHours || 0), 0);
       const totalHours = report.dailyRecords.reduce((sum, r) => sum + (r.totalHours || 0), 0);
@@ -247,10 +264,10 @@ export default function Home() {
         formattedNetHours: formatDuration(totalNetHours)
       };
     });
-  }, [fileText, selectedEmployees, month, year]);
+  }, [fileText, selectedEmployeesNet, month, year]);
 
   const downloadBulkNetHoursExcel = () => {
-    if (selectedEmployees.length === 0 || !fileText) return;
+    if (selectedEmployeesNet.length === 0 || !fileText) return;
 
     try {
       const m = parseInt(month);
@@ -262,23 +279,25 @@ export default function Home() {
         dateObj.setDate(dateObj.getDate() + 1);
       }
 
-      const employeeReports = selectedEmployees.map(id => ({
+      const employeeReports = selectedEmployeesNet.map(id => ({
         id,
         report: analyzeAttendance(fileText, id, month, year)
       }));
 
-      // Sheet 1: Net Hours Grid (rows are dates, columns are employee IDs)
-      const gridData = allExpectedDates.map(dateStr => {
-        const row = {
-          "Date": dateStr,
-          "Day": new Date(dateStr).toLocaleDateString("en-US", { weekday: "short" })
-        };
-        employeeReports.forEach(emp => {
+      // Sheet 1: Net Hours Grid (rows are employee IDs, columns are dates at the top)
+      const headerDates = ["Employee ID", ...allExpectedDates];
+      const headerDays = ["Day", ...allExpectedDates.map(dateStr => new Date(dateStr).toLocaleDateString("en-US", { weekday: "short" }))];
+      
+      const gridRows = employeeReports.map(emp => {
+        const rowData = [emp.id];
+        allExpectedDates.forEach(dateStr => {
           const dailyRecord = emp.report.dailyRecords.find(r => r.date === dateStr);
-          row[`ID: ${emp.id}`] = dailyRecord ? (dailyRecord.netHours || 0) : 0;
+          rowData.push(dailyRecord ? (dailyRecord.netHours || 0) : 0);
         });
-        return row;
+        return rowData;
       });
+
+      const gridData = [headerDates, headerDays, ...gridRows];
 
       // Sheet 2: Net Hours Flat List
       const listData = [];
@@ -297,7 +316,7 @@ export default function Home() {
 
       const wb = XLSX.utils.book_new();
       
-      const wsGrid = XLSX.utils.json_to_sheet(gridData);
+      const wsGrid = XLSX.utils.aoa_to_sheet(gridData);
       XLSX.utils.book_append_sheet(wb, wsGrid, "Net Hours Grid");
 
       const wsList = XLSX.utils.json_to_sheet(listData);
@@ -1113,7 +1132,7 @@ export default function Home() {
                           onClick={selectAllEmployees}
                           className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold uppercase tracking-wider"
                         >
-                          {selectedEmployees.length === availableEmployees.length ? "Deselect All" : "Select All"}
+                          {selectedEmployeesNet.length === availableEmployees.length ? "Deselect All" : "Select All"}
                         </button>
                       )}
                     </div>
@@ -1129,7 +1148,7 @@ export default function Home() {
                             value={bulkPasteInput}
                             onChange={(e) => handleBulkIdPaste(e.target.value)}
                           />
-                          {selectedEmployees.length > 0 && (
+                          {selectedEmployeesNet.length > 0 && (
                             <div className="flex justify-end mt-1">
                               <button
                                 onClick={handleClearList}
@@ -1191,7 +1210,7 @@ export default function Home() {
                                 <input
                                   type="checkbox"
                                   className="accent-indigo-500 w-4 h-4 rounded border-glass-border bg-glass"
-                                  checked={selectedEmployees.includes(id)}
+                                  checked={selectedEmployeesNet.includes(id)}
                                   onChange={() => toggleEmployeeSelection(id)}
                                 />
                                 <span className="text-sm font-mono group-hover:text-indigo-400 transition-colors">ID: {id}</span>
