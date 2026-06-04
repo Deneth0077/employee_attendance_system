@@ -15,7 +15,9 @@ import {
   BarChart3,
   ChevronRight,
   ChevronDown,
-  Search
+  Search,
+  Sparkles,
+  Settings
 } from "lucide-react";
 import { analyzeAttendance, analyzeAttendanceRange, getEmployeeIds } from "@/lib/attendance";
 import { Parser } from "json2csv";
@@ -108,6 +110,72 @@ export default function Home() {
   const [viewEmployeeNetHours, setViewEmployeeNetHours] = useState(null);
   const [bulkPasteInput, setBulkPasteInput] = useState("");
   const [singleIdInput, setSingleIdInput] = useState("");
+
+  // AI Auditor States
+  const [userApiKey, setUserApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("gemini_api_key") || "" : ""));
+  const [aiAuditResults, setAiAuditResults] = useState({});
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [auditError, setAuditError] = useState("");
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  const handleSaveApiKey = (key) => {
+    setUserApiKey(key);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("gemini_api_key", key);
+    }
+  };
+
+  const handleRunAudit = async (empId, currentReport) => {
+    if (!fileText) return;
+    setIsAuditing(true);
+    setAuditError("");
+
+    try {
+      // Extract raw lines for this employee and this month/year
+      const lines = fileText.trim().split('\n');
+      const employeeRawLogs = [];
+      lines.forEach(line => {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 5) return;
+        const [id, date] = parts;
+        if (id === empId) {
+          const [sYear, sMonth] = date.split('-').map(Number);
+          if (sMonth === parseInt(month) && sYear === parseInt(year)) {
+            employeeRawLogs.push(line);
+          }
+        }
+      });
+
+      const response = await fetch("/api/audit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-gemini-key": userApiKey,
+        },
+        body: JSON.stringify({
+          rawLogs: employeeRawLogs.join("\n"),
+          dailyRecords: currentReport.dailyRecords,
+          employeeId: empId,
+          month,
+          year,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to audit data");
+      }
+
+      setAiAuditResults(prev => ({
+        ...prev,
+        [empId]: data,
+      }));
+    } catch (err) {
+      setAuditError(err.message || "An error occurred during audit");
+    } finally {
+      setIsAuditing(false);
+    }
+  };
 
   const handleFileUpload = async (e) => {
     const selectedFile = e.target.files[0];
@@ -264,6 +332,8 @@ export default function Home() {
 
     setIsProcessing(true);
     setError("");
+    setAiAuditResults({});
+    setAuditError("");
 
     try {
       const text = fileText || await file.text();
@@ -1002,6 +1072,169 @@ export default function Home() {
                     />
                   </div>
 
+                  {/* AI Auditor Panel */}
+                  <div className="glass-morphism rounded-3xl p-6 relative overflow-hidden border border-glass-border">
+                    {/* Glowing background effect */}
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+                    
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-3 bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 rounded-2xl">
+                          <Sparkles className="w-6 h-6 text-indigo-400 animate-pulse" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                            AI Attendance Auditor
+                            <span className="text-[10px] font-bold tracking-widest px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 uppercase">
+                              Gemini Powered
+                            </span>
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            Verify calculation accuracy and detect anomalies using Google Gemini API.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setShowSettingsModal(true)}
+                          className="p-2.5 bg-white/5 hover:bg-white/10 border border-glass-border rounded-xl transition-all text-muted-foreground hover:text-white cursor-pointer"
+                          title="AI Settings"
+                        >
+                          <Settings className="w-4 h-4" />
+                        </button>
+                        
+                        <button
+                          onClick={() => handleRunAudit(result.employeeId, result)}
+                          disabled={isAuditing}
+                          className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-900/20 transition-all text-sm flex items-center gap-2 border border-indigo-400/25 cursor-pointer animate-pulse hover:animate-none"
+                        >
+                          {isAuditing ? (
+                            <>
+                              <motion.div
+                                animate={{ rotate: 360 }}
+                                transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                                className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                              />
+                              Auditing...
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-4 h-4" />
+                              {aiAuditResults[result?.employeeId] ? "Re-Audit Logs" : "Run AI Audit"}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {auditError && (
+                      <div className="mt-4 p-4 bg-red-500/10 border border-red-500/25 rounded-2xl text-red-400 text-xs flex items-center gap-2 animate-bounce">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{auditError}</span>
+                      </div>
+                    )}
+
+                    {/* Audit Results View */}
+                    {aiAuditResults[result?.employeeId] && (
+                      <div className="mt-6 space-y-4">
+                        <div className="p-4 bg-white/5 border border-glass-border rounded-2xl">
+                          <h4 className="text-sm font-bold text-white mb-1">Audit Summary</h4>
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            {aiAuditResults[result.employeeId].summary}
+                          </p>
+                        </div>
+
+                        {/* If calculation discrepancies or anomalies found, show warning badge */}
+                        {aiAuditResults[result.employeeId].hasIssue ? (
+                          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3">
+                            <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                            <div>
+                              <h4 className="text-sm font-bold text-red-400">Attention Required</h4>
+                              <p className="text-xs text-red-300 mt-1">
+                                Discrepancies or anomalies were detected. Please review the details below.
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-start gap-3">
+                            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                            <div>
+                              <h4 className="text-sm font-bold text-emerald-400">Calculations Verified</h4>
+                              <p className="text-xs text-emerald-300 mt-1">
+                                Gemini AI verified all computations (hours, duplicates, status) and found them in complete agreement with your logic rules. No discrepancies found.
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Discrepancies Panel */}
+                          <div className="p-4 bg-white/5 border border-glass-border rounded-2xl space-y-3">
+                            <div className="flex items-center gap-2 text-red-400">
+                              <AlertCircle className="w-4 h-4" />
+                              <h4 className="text-sm font-bold uppercase tracking-wider">Calculation Discrepancies</h4>
+                            </div>
+                            <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                              {aiAuditResults[result.employeeId].discrepancies && aiAuditResults[result.employeeId].discrepancies.length > 0 ? (
+                                aiAuditResults[result.employeeId].discrepancies.map((d, i) => (
+                                  <div key={i} className="p-3 bg-red-500/5 border border-red-500/10 rounded-xl space-y-1">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-xs font-mono font-bold text-red-400">ID: {result.employeeId} | {d.date}</span>
+                                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 uppercase tracking-wider">
+                                        {d.severity}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">{d.description}</p>
+                                  </div>
+                                ))
+                              ) : (
+                                <p className="text-xs text-emerald-400 flex items-center gap-1.5 py-2">
+                                  <CheckCircle2 className="w-3.5 h-3.5" /> No calculation mismatches identified.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Anomalies Panel */}
+                          <div className="p-4 bg-white/5 border border-glass-border rounded-2xl space-y-3">
+                            <div className="flex items-center gap-2 text-amber-400">
+                              <AlertCircle className="w-4 h-4" />
+                              <h4 className="text-sm font-bold uppercase tracking-wider">Attendance Anomalies</h4>
+                            </div>
+                            <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+                              {aiAuditResults[result.employeeId].anomalies && aiAuditResults[result.employeeId].anomalies.length > 0 ? (
+                                aiAuditResults[result.employeeId].anomalies.map((a, i) => (
+                                  <div key={i} className="p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl space-y-1">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-xs font-mono font-bold text-amber-400">ID: {result.employeeId} | {a.date}</span>
+                                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 uppercase tracking-wider">
+                                        {a.severity}
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">{a.description}</p>
+                                  </div>
+                                ))
+                              ) : (
+                                <p className="text-xs text-muted-foreground/60 py-2 italic">
+                                  No attendance anomalies identified.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {!aiAuditResults[result?.employeeId] && !isAuditing && (
+                      <div className="mt-4 py-4 text-center border border-dashed border-glass-border rounded-2xl bg-white/[0.01]">
+                        <p className="text-xs text-muted-foreground">
+                          Click **Run AI Audit** to verify calculations against your logic rules and detect anomalies.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="glass-morphism rounded-3xl overflow-hidden">
                     <div className="p-6 border-b border-glass-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/5">
                       <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full sm:w-auto">
@@ -1131,7 +1364,19 @@ export default function Home() {
                                 {typeof row.totalHours === 'number' ? formatDuration(row.totalHours) : '--'}
                               </td>
                               <td className="px-6 py-4 font-semibold text-center text-sm">
-                                {typeof row.netHours === 'number' ? formatDuration(row.netHours) : '--'}
+                                <div className="flex flex-col items-center justify-center gap-1">
+                                  <span>{typeof row.netHours === 'number' ? formatDuration(row.netHours) : '--'}</span>
+                                  {(() => {
+                                    const audit = aiAuditResults[result?.employeeId];
+                                    const hasRowIssue = audit?.discrepancies?.some(d => d.date === row.date) || 
+                                                        audit?.anomalies?.some(a => a.date === row.date);
+                                    return hasRowIssue ? (
+                                      <span className="text-[9px] text-red-400 font-bold bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20 uppercase tracking-tighter shrink-0 whitespace-nowrap">
+                                        AI Detect Issue
+                                      </span>
+                                    ) : null;
+                                  })()}
+                                </div>
                               </td>
                               <td className="px-6 py-4">
                                 <StatusBadge status={row.status} />
@@ -1616,6 +1861,61 @@ export default function Home() {
                   Close
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {showSettingsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="glass-morphism rounded-3xl p-8 max-w-sm w-full border border-glass-border shadow-2xl space-y-6"
+            >
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-indigo-400" />
+                  <h3 className="text-xl font-bold text-white">AI Auditor Settings</h3>
+                </div>
+                <button
+                  onClick={() => setShowSettingsModal(false)}
+                  className="p-2 hover:bg-white/10 rounded-xl transition-colors text-white cursor-pointer"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Enter your Google Gemini API Key. This key is saved locally in your browser's localStorage and is used for AI Audits.
+                </p>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                    Gemini API Key
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="AIzaSy..."
+                    className="w-full bg-glass border border-glass-border rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500/50 font-mono text-white"
+                    value={userApiKey}
+                    onChange={(e) => handleSaveApiKey(e.target.value)}
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Don't have a key? You can get a free key from Google AI Studio.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold py-3 rounded-xl transition-all cursor-pointer shadow-lg shadow-indigo-950/20"
+              >
+                Save & Close
+              </button>
             </motion.div>
           </div>
         )}
