@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload,
@@ -47,6 +47,8 @@ function cn(...inputs) {
 
 export default function Home() {
   const [file, setFile] = useState(null);
+  const [fileText, setFileText] = useState("");
+  const [activeTab, setActiveTab] = useState("analyzer"); // "analyzer" or "net-hours"
   const [employeeId, setEmployeeId] = useState(""); // Kept for backward compatibility/single input if needed
   const [availableEmployees, setAvailableEmployees] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState([]);
@@ -72,6 +74,7 @@ export default function Home() {
 
       try {
         const text = await selectedFile.text();
+        setFileText(text);
         const ids = getEmployeeIds(text);
         setAvailableEmployees(ids);
         setSelectedEmployees([]); // Reset selection on new file
@@ -109,7 +112,8 @@ export default function Home() {
     setError("");
 
     try {
-      const text = await file.text();
+      const text = fileText || await file.text();
+      if (!fileText) setFileText(text);
       const allResults = selectedEmployees.map(id =>
         analyzeAttendance(text, id, month, year)
       ).filter(res => res.dailyRecords.length > 0);
@@ -125,6 +129,75 @@ export default function Home() {
     } catch (err) {
       setError("Error processing file.");
       setIsProcessing(false);
+    }
+  };
+
+  const exportSummaries = useMemo(() => {
+    if (!fileText || selectedEmployees.length === 0) return [];
+    return selectedEmployees.map(id => {
+      const report = analyzeAttendance(fileText, id, month, year);
+      const totalNetHours = report.dailyRecords.reduce((sum, r) => sum + (r.netHours || 0), 0);
+      const totalHours = report.dailyRecords.reduce((sum, r) => sum + (r.totalHours || 0), 0);
+      const presentDays = report.summary.totalDaysWithRecords;
+      const totalDays = report.summary.totalDays;
+      const absentDays = report.summary.totalAbsentDays;
+      return {
+        employeeId: id,
+        totalDays,
+        presentDays,
+        absentDays,
+        totalHours: parseFloat(totalHours.toFixed(2)),
+        totalNetHours,
+        formattedNetHours: formatDuration(totalNetHours)
+      };
+    });
+  }, [fileText, selectedEmployees, month, year]);
+
+  const downloadBulkNetHoursExcel = () => {
+    if (exportSummaries.length === 0) return;
+
+    try {
+      const summaryData = exportSummaries.map(s => ({
+        "Employee ID": s.employeeId,
+        "Year": year,
+        "Month": new Date(0, parseInt(month) - 1).toLocaleString('default', { month: 'long' }),
+        "Total Days": s.totalDays,
+        "Present Days": s.presentDays,
+        "Absent Days": s.absentDays,
+        "Total Hours (Decimal)": s.totalHours,
+        "Total Net Hours (Decimal)": s.totalNetHours,
+        "Total Net Hours (Formatted)": s.formattedNetHours
+      }));
+
+      let detailedData = [];
+      exportSummaries.forEach(s => {
+        const report = analyzeAttendance(fileText, s.employeeId, month, year);
+        report.dailyRecords.forEach(r => {
+          detailedData.push({
+            "Employee ID": s.employeeId,
+            "Date": r.date,
+            "Day": new Date(r.date).toLocaleDateString("en-US", { weekday: "short" }),
+            "IN Time": r.inTime,
+            "OUT Time": r.outTime,
+            "Total Hours": formatDuration(r.totalHours),
+            "Net Hours": formatDuration(r.netHours),
+            "Status": r.status
+          });
+        });
+      });
+
+      const wb = XLSX.utils.book_new();
+      
+      const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(wb, wsSummary, "Net Hours Summary");
+
+      const wsDetailed = XLSX.utils.json_to_sheet(detailedData);
+      XLSX.utils.book_append_sheet(wb, wsDetailed, "Daily Breakdown");
+
+      const fileName = `Net_Hours_Summary_${month}_${year}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+    } catch (err) {
+      console.error("Excel Export failed", err);
     }
   };
 
@@ -330,7 +403,8 @@ export default function Home() {
     if (!file || !exportStartDate || !exportEndDate) return;
 
     try {
-      const text = await file.text();
+      const text = fileText || await file.text();
+      if (!fileText) setFileText(text);
       const currentResult = results[activeResultIndex];
       const rangeResult = analyzeAttendanceRange(text, currentResult.employeeId, exportStartDate, exportEndDate);
 
@@ -486,7 +560,38 @@ export default function Home() {
           </motion.p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Tab switcher */}
+        <div className="flex justify-center">
+          <div className="bg-glass border border-glass-border p-1 rounded-2xl flex gap-1 shadow-lg backdrop-blur-md">
+            <button
+              onClick={() => setActiveTab("analyzer")}
+              className={cn(
+                "px-5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+                activeTab === "analyzer"
+                  ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-900/20"
+                  : "text-muted-foreground hover:text-white hover:bg-white/5"
+              )}
+            >
+              <BarChart3 className="w-4 h-4" />
+              Detailed Analyzer
+            </button>
+            <button
+              onClick={() => setActiveTab("net-hours")}
+              className={cn(
+                "px-5 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
+                activeTab === "net-hours"
+                  ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-900/20"
+                  : "text-muted-foreground hover:text-white hover:bg-white/5"
+              )}
+            >
+              <Download className="w-4 h-4" />
+              Bulk Net Hours Exporter
+            </button>
+          </div>
+        </div>
+
+        {activeTab === "analyzer" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
           {/* Controls Panel */}
           <motion.div
@@ -846,6 +951,210 @@ export default function Home() {
             </AnimatePresence>
           </div>
         </div>
+        )}
+
+        {activeTab === "net-hours" && (
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 15 }}
+            className="grid grid-cols-1 lg:grid-cols-3 gap-8"
+          >
+            {/* Controls Panel */}
+            <div className="lg:col-span-1 space-y-6">
+              <div className="glass-morphism rounded-3xl p-6 space-y-6">
+                <h2 className="text-xl font-semibold flex items-center gap-2">
+                  <Filter className="w-5 h-5 text-indigo-400" />
+                  Export Parameters
+                </h2>
+
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-muted-foreground font-semibold">Log File</label>
+                    {file ? (
+                      <div className="bg-glass border border-glass-border rounded-2xl p-4 flex items-center gap-3">
+                        <FileText className="w-8 h-8 text-indigo-400" />
+                        <div className="flex-1 overflow-hidden">
+                          <p className="text-sm font-medium truncate">{file.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {availableEmployees.length} employees loaded
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-glass-border rounded-2xl cursor-pointer hover:bg-glass transition-colors">
+                        <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                          <Upload className="w-8 h-8 mb-2 text-muted-foreground" />
+                          <p className="text-xs text-muted-foreground">
+                            Click to upload data.dat
+                          </p>
+                        </div>
+                        <input type="file" className="hidden" onChange={handleFileUpload} />
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-sm font-medium text-muted-foreground flex items-center gap-2 font-semibold">
+                        <User className="w-4 h-4" /> Employee IDs
+                      </label>
+                      {availableEmployees.length > 0 && (
+                        <button
+                          onClick={selectAllEmployees}
+                          className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold uppercase tracking-wider"
+                        >
+                          {selectedEmployees.length === availableEmployees.length ? "Deselect All" : "Select All"}
+                        </button>
+                      )}
+                    </div>
+
+                    {availableEmployees.length > 0 && (
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <input
+                          type="text"
+                          placeholder="Search ID..."
+                          className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                      </div>
+                    )}
+
+                    <div className="bg-glass border border-glass-border rounded-xl p-3 max-h-80 overflow-y-auto custom-scrollbar">
+                      {availableEmployees.length > 0 ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          {availableEmployees
+                            .filter(id => id.toLowerCase().includes(searchQuery.toLowerCase()))
+                            .map(id => (
+                              <label key={id} className="flex items-center gap-2 p-2 hover:bg-white/5 rounded-lg cursor-pointer transition-colors group">
+                                <input
+                                  type="checkbox"
+                                  className="accent-indigo-500 w-4 h-4 rounded border-glass-border bg-glass"
+                                  checked={selectedEmployees.includes(id)}
+                                  onChange={() => toggleEmployeeSelection(id)}
+                                />
+                                <span className="text-sm font-mono group-hover:text-indigo-400 transition-colors">ID: {id}</span>
+                              </label>
+                            ))}
+                          {availableEmployees.filter(id => id.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                            <div className="col-span-2 py-4 text-center">
+                              <p className="text-xs text-muted-foreground italic">No IDs match your search</p>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-center py-4">
+                          <p className="text-xs text-muted-foreground italic">Upload a file to see IDs</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <Calendar className="w-4 h-4" /> Month
+                      </label>
+                      <select
+                        className="w-full bg-glass border border-glass-border rounded-xl px-4 py-2 focus:outline-none"
+                        value={month}
+                        onChange={(e) => setMonth(e.target.value)}
+                      >
+                        {Array.from({ length: 12 }, (_, i) => (
+                          <option key={i + 1} value={i + 1} className="bg-[#0f0f0f]">
+                            {new Date(0, i).toLocaleString('default', { month: 'long' })}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                        <Calendar className="w-4 h-4" /> Year
+                      </label>
+                      <input
+                        type="number"
+                        className="w-full bg-glass border border-glass-border rounded-xl px-4 py-2 focus:outline-none"
+                        value={year}
+                        onChange={(e) => setYear(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Results/Preview Area */}
+            <div className="lg:col-span-2 space-y-6">
+              {exportSummaries.length === 0 ? (
+                <div className="h-full min-h-[400px] glass-morphism rounded-3xl flex flex-col items-center justify-center text-center p-8 border-dashed border-2">
+                  <FileText className="w-16 h-16 text-muted-foreground/30 mb-4" />
+                  <h3 className="text-xl font-medium text-muted-foreground">Select Employees</h3>
+                  <p className="text-sm text-muted-foreground/60 max-w-sm mt-2">
+                    {availableEmployees.length > 0
+                      ? "Select employee IDs on the left to preview their net hours."
+                      : "Please upload the attendance file to begin."}
+                  </p>
+                </div>
+              ) : (
+                <div className="glass-morphism rounded-3xl overflow-hidden">
+                  <div className="p-6 border-b border-glass-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/5">
+                    <div>
+                      <h3 className="text-xl font-semibold">Net Hours Export Summary</h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Previewing {exportSummaries.length} employee(s) for {new Date(0, parseInt(month) - 1).toLocaleString('default', { month: 'long' })} {year}
+                      </p>
+                    </div>
+                    <button
+                      onClick={downloadBulkNetHoursExcel}
+                      className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold px-5 py-3 rounded-xl shadow-lg transition-all text-sm"
+                    >
+                      <Download className="w-4 h-4" />
+                      Download Excel
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-white/5 text-muted-foreground text-[10px] uppercase tracking-wider">
+                          <th className="px-6 py-4 font-semibold">Employee ID</th>
+                          <th className="px-6 py-4 font-semibold text-center">Total Days</th>
+                          <th className="px-6 py-4 font-semibold text-center">Present</th>
+                          <th className="px-6 py-4 font-semibold text-center">Absent</th>
+                          <th className="px-6 py-4 font-semibold text-center">Total Hours</th>
+                          <th className="px-6 py-4 font-semibold text-center">Net Hours</th>
+                          <th className="px-6 py-4 font-semibold text-center">Net Hours (Formatted)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-glass-border">
+                        {exportSummaries.map((row, idx) => (
+                          <motion.tr
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: idx * 0.05 }}
+                            key={row.employeeId}
+                            className="hover:bg-white/5 transition-colors group"
+                          >
+                            <td className="px-6 py-4 font-medium text-sm">
+                              ID: {row.employeeId}
+                            </td>
+                            <td className="px-6 py-4 text-center font-mono text-sm">{row.totalDays}</td>
+                            <td className="px-6 py-4 text-center text-emerald-400 font-mono text-sm">{row.presentDays}</td>
+                            <td className="px-6 py-4 text-center text-gray-400 font-mono text-sm">{row.absentDays}</td>
+                            <td className="px-6 py-4 text-center font-mono text-sm">{row.totalHours}h</td>
+                            <td className="px-6 py-4 text-center text-indigo-400 font-mono text-sm font-bold">{row.totalNetHours}h</td>
+                            <td className="px-6 py-4 text-center text-purple-400 font-mono text-sm font-bold">{row.formattedNetHours}</td>
+                          </motion.tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
       </div>
       <AnimatePresence>
         {selectedDayLogs && (
