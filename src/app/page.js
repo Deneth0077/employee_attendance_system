@@ -22,7 +22,7 @@ import { Parser } from "json2csv";
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import JSZip from "jszip";
-import * as XLSX from "xlsx";
+import XLSX from "xlsx-js-style";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -39,6 +39,34 @@ const formatDuration = (hours) => {
   if (finalH === 0) return `${finalM}m`;
   if (finalM === 0) return `${finalH}h`;
   return `${finalH}h ${finalM}m`;
+};
+
+const styleMissingRecords = (ws) => {
+  if (!ws) return;
+  for (const cellRef in ws) {
+    if (cellRef.startsWith("!")) continue;
+    const cell = ws[cellRef];
+    if (cell && typeof cell.v === "string") {
+      if (cell.v.includes("(NO IN)") || cell.v.includes("(NO OUT)")) {
+        cell.s = {
+          fill: {
+            patternType: "solid",
+            fgColor: { rgb: "FFE2E2" } // Soft pastel red/pink background
+          },
+          font: {
+            name: "Arial",
+            sz: 10,
+            bold: true,
+            color: { rgb: "990000" } // Dark red text
+          },
+          alignment: {
+            horizontal: "center",
+            vertical: "center"
+          }
+        };
+      }
+    }
+  }
 };
 
 const DEFAULT_EMPLOYEE_LIST = [
@@ -192,16 +220,29 @@ export default function Home() {
 
       const sheetData = allExpectedDates.map(dateStr => {
         const dailyRecord = report.dailyRecords.find(r => r.date === dateStr);
+        let netHoursVal = 0;
+        if (dailyRecord) {
+          if (dailyRecord.status === "NO IN RECORD") {
+            netHoursVal = `${dailyRecord.netHours || 0} (NO IN)`;
+          } else if (dailyRecord.status === "OUT MISSING") {
+            netHoursVal = `${dailyRecord.netHours || 0} (NO OUT)`;
+          } else if (dailyRecord.status === "ABSENT") {
+            netHoursVal = 0;
+          } else {
+            netHoursVal = dailyRecord.netHours || 0;
+          }
+        }
         return {
           "Date": dateStr,
           "Day": new Date(dateStr).toLocaleDateString("en-US", { weekday: "short" }),
           "Employee ID": empId,
-          "Net Hours": dailyRecord ? (dailyRecord.netHours || 0) : 0
+          "Net Hours": netHoursVal
         };
       });
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(sheetData);
+      styleMissingRecords(ws);
       XLSX.utils.book_append_sheet(wb, ws, `Net Hours - ${empId}`);
 
       const fileName = `Net_Hours_Employee_${empId}_${month}_${year}.xlsx`;
@@ -292,7 +333,19 @@ export default function Home() {
         const rowData = [emp.id];
         allExpectedDates.forEach(dateStr => {
           const dailyRecord = emp.report.dailyRecords.find(r => r.date === dateStr);
-          rowData.push(dailyRecord ? (dailyRecord.netHours || 0) : 0);
+          let netHoursVal = 0;
+          if (dailyRecord) {
+            if (dailyRecord.status === "NO IN RECORD") {
+              netHoursVal = `${dailyRecord.netHours || 0} (NO IN)`;
+            } else if (dailyRecord.status === "OUT MISSING") {
+              netHoursVal = `${dailyRecord.netHours || 0} (NO OUT)`;
+            } else if (dailyRecord.status === "ABSENT") {
+              netHoursVal = 0;
+            } else {
+              netHoursVal = dailyRecord.netHours || 0;
+            }
+          }
+          rowData.push(netHoursVal);
         });
         return rowData;
       });
@@ -305,11 +358,23 @@ export default function Home() {
         const dayStr = new Date(dateStr).toLocaleDateString("en-US", { weekday: "short" });
         employeeReports.forEach(emp => {
           const dailyRecord = emp.report.dailyRecords.find(r => r.date === dateStr);
+          let netHoursVal = 0;
+          if (dailyRecord) {
+            if (dailyRecord.status === "NO IN RECORD") {
+              netHoursVal = `${dailyRecord.netHours || 0} (NO IN)`;
+            } else if (dailyRecord.status === "OUT MISSING") {
+              netHoursVal = `${dailyRecord.netHours || 0} (NO OUT)`;
+            } else if (dailyRecord.status === "ABSENT") {
+              netHoursVal = 0;
+            } else {
+              netHoursVal = dailyRecord.netHours || 0;
+            }
+          }
           listData.push({
             "Date": dateStr,
             "Day": dayStr,
             "Employee ID": emp.id,
-            "Net Hours": dailyRecord ? (dailyRecord.netHours || 0) : 0
+            "Net Hours": netHoursVal
           });
         });
       });
@@ -317,9 +382,11 @@ export default function Home() {
       const wb = XLSX.utils.book_new();
       
       const wsGrid = XLSX.utils.aoa_to_sheet(gridData);
+      styleMissingRecords(wsGrid);
       XLSX.utils.book_append_sheet(wb, wsGrid, "Net Hours Grid");
 
       const wsList = XLSX.utils.json_to_sheet(listData);
+      styleMissingRecords(wsList);
       XLSX.utils.book_append_sheet(wb, wsList, "Net Hours List");
 
       const fileName = `Bulk_Net_Hours_${month}_${year}.xlsx`;
@@ -493,6 +560,7 @@ export default function Home() {
     if (data.length === 0) return;
 
     const ws = XLSX.utils.json_to_sheet(data);
+    styleMissingRecords(ws);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Attendance_All");
 
