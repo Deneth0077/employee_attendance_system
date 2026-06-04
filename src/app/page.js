@@ -41,6 +41,16 @@ const formatDuration = (hours) => {
   return `${finalH}h ${finalM}m`;
 };
 
+const DEFAULT_EMPLOYEE_LIST = [
+  "56", "109", "117", "162", "180", "184", "198", "227", "228", "230", "297", "402", "406", "414", "415", "434", "435", 
+  "442", "443", "444", "446", "456", "457", "458", "459", "462", "463", "468", "469", "470", "472", "473", "477", "488", 
+  "501", "505", "506", "507", "508", "509", "510", "511", "512", "513", "514", "515", "516", "517", "519", "520", "521", 
+  "522", "523", "524", "525", "526", "527", "528", "529", "530", "535", "543", "546", "550", "551", "556", "560", "573", 
+  "588", "600", "619", "643", "647", "662", "663", "666", "667", "668", "682", "683", "684", "685", "686", "687", "689", 
+  "691", "697", "698", "699", "700", "701", "702", "703", "704", "705", "706", "735", "748", "754", "758", "760", "768", 
+  "769", "773", "774", "779", "790", "791", "793"
+];
+
 function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
@@ -68,6 +78,7 @@ export default function Home() {
 
   const [viewEmployeeNetHours, setViewEmployeeNetHours] = useState(null);
   const [bulkPasteInput, setBulkPasteInput] = useState("");
+  const [singleIdInput, setSingleIdInput] = useState("");
 
   const handleFileUpload = async (e) => {
     const selectedFile = e.target.files[0];
@@ -80,8 +91,11 @@ export default function Home() {
         setFileText(text);
         const ids = getEmployeeIds(text);
         setAvailableEmployees(ids);
-        setSelectedEmployees([]); // Reset selection on new file
-        setBulkPasteInput("");
+        
+        // Find default employees that are actually available in the uploaded file
+        const defaultSelected = DEFAULT_EMPLOYEE_LIST.filter(id => ids.includes(id));
+        setSelectedEmployees(defaultSelected);
+        setBulkPasteInput(defaultSelected.join("\n"));
       } catch (err) {
         setError("Error reading file.");
       }
@@ -104,6 +118,29 @@ export default function Home() {
       setSelectedEmployees([...availableEmployees]);
       setBulkPasteInput(availableEmployees.join("\n"));
     }
+  };
+
+  const handleClearList = () => {
+    setSelectedEmployees([]);
+    setBulkPasteInput("");
+  };
+
+  const handleAddSingleId = () => {
+    const trimmed = singleIdInput.trim();
+    if (trimmed === "") return;
+
+    if (!availableEmployees.includes(trimmed)) {
+      alert(`Employee ID ${trimmed} is not found in the uploaded file.`);
+      return;
+    }
+
+    setSelectedEmployees(prev => {
+      if (prev.includes(trimmed)) return prev;
+      const next = [...prev, trimmed];
+      setBulkPasteInput(next.join("\n"));
+      return next;
+    });
+    setSingleIdInput("");
   };
 
   const handleBulkIdPaste = (val) => {
@@ -707,26 +744,15 @@ export default function Home() {
                   </div>
 
                   {availableEmployees.length > 0 && (
-                    <div className="flex flex-col gap-2">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <input
-                          type="text"
-                          placeholder="Search ID..."
-                          className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <textarea
-                          rows={3}
-                          placeholder="Paste ID List (separated by lines or commas)..."
-                          className="w-full bg-glass border border-glass-border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono resize-none custom-scrollbar"
-                          value={bulkPasteInput}
-                          onChange={(e) => handleBulkIdPaste(e.target.value)}
-                        />
-                      </div>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <input
+                        type="text"
+                        placeholder="Search ID..."
+                        className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
                     </div>
                   )}
 
@@ -1093,7 +1119,55 @@ export default function Home() {
                     </div>
 
                     {availableEmployees.length > 0 && (
-                      <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-3">
+                        {/* Paste Area & Clear Button */}
+                        <div className="space-y-1">
+                          <textarea
+                            rows={3}
+                            placeholder="Paste ID List (separated by lines or commas)..."
+                            className="w-full bg-glass border border-glass-border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono resize-none custom-scrollbar"
+                            value={bulkPasteInput}
+                            onChange={(e) => handleBulkIdPaste(e.target.value)}
+                          />
+                          {selectedEmployees.length > 0 && (
+                            <div className="flex justify-end mt-1">
+                              <button
+                                onClick={handleClearList}
+                                className="text-[10px] text-rose-400 hover:text-rose-300 font-bold uppercase tracking-wider bg-rose-500/10 hover:bg-rose-500/20 px-2.5 py-1 rounded-lg border border-rose-500/25 transition-all"
+                              >
+                                Clear List
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Add Another Emp No */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Add Another Emp No</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              placeholder="Type ID to add..."
+                              className="flex-1 bg-glass border border-glass-border rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono"
+                              value={singleIdInput}
+                              onChange={(e) => setSingleIdInput(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleAddSingleId();
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={handleAddSingleId}
+                              className="bg-indigo-600/20 hover:bg-indigo-500/30 text-indigo-400 border border-indigo-500/35 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-md"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Search ID filter */}
                         <div className="relative">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                           <input
@@ -1102,15 +1176,6 @@ export default function Home() {
                             className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <textarea
-                            rows={3}
-                            placeholder="Paste ID List (separated by lines or commas)..."
-                            className="w-full bg-glass border border-glass-border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono resize-none custom-scrollbar"
-                            value={bulkPasteInput}
-                            onChange={(e) => handleBulkIdPaste(e.target.value)}
                           />
                         </div>
                       </div>
