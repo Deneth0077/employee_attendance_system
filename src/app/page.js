@@ -66,6 +66,9 @@ export default function Home() {
   const [exportStartDate, setExportStartDate] = useState("");
   const [exportEndDate, setExportEndDate] = useState("");
 
+  const [viewEmployeeNetHours, setViewEmployeeNetHours] = useState(null);
+  const [bulkPasteInput, setBulkPasteInput] = useState("");
+
   const handleFileUpload = async (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
@@ -78,6 +81,7 @@ export default function Home() {
         const ids = getEmployeeIds(text);
         setAvailableEmployees(ids);
         setSelectedEmployees([]); // Reset selection on new file
+        setBulkPasteInput("");
       } catch (err) {
         setError("Error reading file.");
       }
@@ -85,16 +89,71 @@ export default function Home() {
   };
 
   const toggleEmployeeSelection = (id) => {
-    setSelectedEmployees(prev =>
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-    );
+    setSelectedEmployees(prev => {
+      const next = prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id];
+      setBulkPasteInput(next.join("\n"));
+      return next;
+    });
   };
 
   const selectAllEmployees = () => {
     if (selectedEmployees.length === availableEmployees.length) {
       setSelectedEmployees([]);
+      setBulkPasteInput("");
     } else {
       setSelectedEmployees([...availableEmployees]);
+      setBulkPasteInput(availableEmployees.join("\n"));
+    }
+  };
+
+  const handleBulkIdPaste = (val) => {
+    setBulkPasteInput(val);
+    if (val.trim() === "") {
+      setSelectedEmployees([]);
+      return;
+    }
+    const parsedIds = val.replace(/,/g, ' ')
+      .split(/\s+/)
+      .map(id => id.trim())
+      .filter(id => id !== "");
+    
+    const validIds = parsedIds.filter(id => availableEmployees.includes(id));
+    setSelectedEmployees(validIds);
+  };
+
+  const downloadSingleEmployeeNetHoursExcel = (empId) => {
+    if (!fileText) return;
+
+    try {
+      const m = parseInt(month);
+      const y = parseInt(year);
+      const dateObj = new Date(y, m - 1, 1);
+      const allExpectedDates = [];
+      while (dateObj.getMonth() === m - 1) {
+        allExpectedDates.push(`${y}-${String(m).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`);
+        dateObj.setDate(dateObj.getDate() + 1);
+      }
+
+      const report = analyzeAttendance(fileText, empId, month, year);
+
+      const sheetData = allExpectedDates.map(dateStr => {
+        const dailyRecord = report.dailyRecords.find(r => r.date === dateStr);
+        return {
+          "Date": dateStr,
+          "Day": new Date(dateStr).toLocaleDateString("en-US", { weekday: "short" }),
+          "Employee ID": empId,
+          "Net Hours": dailyRecord ? (dailyRecord.netHours || 0) : 0
+        };
+      });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(sheetData);
+      XLSX.utils.book_append_sheet(wb, ws, `Net Hours - ${empId}`);
+
+      const fileName = `Net_Hours_Employee_${empId}_${month}_${year}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+    } catch (err) {
+      console.error("Single employee Excel export failed", err);
     }
   };
 
@@ -648,15 +707,26 @@ export default function Home() {
                   </div>
 
                   {availableEmployees.length > 0 && (
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <input
-                        type="text"
-                        placeholder="Search ID..."
-                        className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                      />
+                    <div className="flex flex-col gap-2">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <input
+                          type="text"
+                          placeholder="Search ID..."
+                          className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <textarea
+                          rows={3}
+                          placeholder="Paste ID List (separated by lines or commas)..."
+                          className="w-full bg-glass border border-glass-border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono resize-none custom-scrollbar"
+                          value={bulkPasteInput}
+                          onChange={(e) => handleBulkIdPaste(e.target.value)}
+                        />
+                      </div>
                     </div>
                   )}
 
@@ -1023,15 +1093,26 @@ export default function Home() {
                     </div>
 
                     {availableEmployees.length > 0 && (
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <input
-                          type="text"
-                          placeholder="Search ID..."
-                          className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                        />
+                      <div className="flex flex-col gap-2">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <input
+                            type="text"
+                            placeholder="Search ID..."
+                            className="w-full bg-glass border border-glass-border rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <textarea
+                            rows={3}
+                            placeholder="Paste ID List (separated by lines or commas)..."
+                            className="w-full bg-glass border border-glass-border rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all font-mono resize-none custom-scrollbar"
+                            value={bulkPasteInput}
+                            onChange={(e) => handleBulkIdPaste(e.target.value)}
+                          />
+                        </div>
                       </div>
                     )}
 
@@ -1135,6 +1216,7 @@ export default function Home() {
                           <th className="px-6 py-4 font-semibold text-center">Total Days</th>
                           <th className="px-6 py-4 font-semibold text-center">Net Hours</th>
                           <th className="px-6 py-4 font-semibold text-center">Net Hours (Formatted)</th>
+                          <th className="px-6 py-4 font-semibold text-center">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-glass-border">
@@ -1152,6 +1234,36 @@ export default function Home() {
                             <td className="px-6 py-4 text-center font-mono text-sm">{row.totalDays}</td>
                             <td className="px-6 py-4 text-center text-indigo-400 font-mono text-sm font-bold">{row.totalNetHours}h</td>
                             <td className="px-6 py-4 text-center text-purple-400 font-mono text-sm font-bold">{row.formattedNetHours}</td>
+                            <td className="px-6 py-4 text-center">
+                              <div className="flex justify-center gap-2">
+                                <button
+                                  onClick={() => {
+                                    try {
+                                      const report = analyzeAttendance(fileText, row.employeeId, month, year);
+                                      setViewEmployeeNetHours({
+                                        employeeId: row.employeeId,
+                                        dailyRecords: report.dailyRecords
+                                      });
+                                    } catch (err) {
+                                      console.error("View employee details failed", err);
+                                    }
+                                  }}
+                                  className="bg-white/10 hover:bg-indigo-500/20 text-indigo-400 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-white/5 hover:border-indigo-500/30 flex items-center gap-1.5"
+                                  title="View daily net hours breakdown"
+                                >
+                                  <Clock className="w-3.5 h-3.5" />
+                                  View
+                                </button>
+                                <button
+                                  onClick={() => downloadSingleEmployeeNetHoursExcel(row.employeeId)}
+                                  className="bg-white/10 hover:bg-emerald-500/20 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border border-white/5 hover:border-emerald-500/30 flex items-center gap-1.5"
+                                  title="Download employee Excel sheet"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  Download Excel
+                                </button>
+                              </div>
+                            </td>
                           </motion.tr>
                         ))}
                       </tbody>
@@ -1280,6 +1392,78 @@ export default function Home() {
                 <Download className="w-5 h-5" />
                 Download PDF
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {viewEmployeeNetHours && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm font-sans">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="glass-morphism rounded-3xl p-8 max-w-lg w-full border border-glass-border shadow-2xl flex flex-col max-h-[85vh] space-y-4"
+            >
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-xl font-bold text-white">Daily Net Hours</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Employee ID: {viewEmployeeNetHours.employeeId} ({new Date(0, parseInt(month) - 1).toLocaleString('default', { month: 'long' })} {year})
+                  </p>
+                </div>
+                <button
+                  onClick={() => setViewEmployeeNetHours(null)}
+                  className="p-2 hover:bg-white/10 rounded-xl transition-colors text-white"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 border border-glass-border/40 rounded-2xl bg-black/20">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-white/5 text-muted-foreground text-[10px] uppercase tracking-wider sticky top-0 backdrop-blur-md">
+                      <th className="px-4 py-3 font-semibold">Date</th>
+                      <th className="px-4 py-3 font-semibold">Day</th>
+                      <th className="px-4 py-3 font-semibold text-center">Net Hours</th>
+                      <th className="px-4 py-3 font-semibold text-center">Formatted</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-glass-border/30 font-mono text-sm">
+                    {viewEmployeeNetHours.dailyRecords.map((row) => (
+                      <tr key={row.date} className="hover:bg-white/5 transition-colors">
+                        <td className="px-4 py-2.5 text-white">{row.date}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">
+                          {new Date(row.date).toLocaleDateString("en-US", { weekday: "short" })}
+                        </td>
+                        <td className="px-4 py-2.5 text-center text-indigo-400 font-bold">{row.netHours}h</td>
+                        <td className="px-4 py-2.5 text-center text-purple-400 font-bold">{formatDuration(row.netHours)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex gap-4 pt-2">
+                <button
+                  onClick={() => {
+                    downloadSingleEmployeeNetHoursExcel(viewEmployeeNetHours.employeeId);
+                  }}
+                  className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Download className="w-5 h-5" />
+                  Download Excel
+                </button>
+                <button
+                  onClick={() => setViewEmployeeNetHours(null)}
+                  className="flex-1 bg-white/10 hover:bg-white/20 text-white font-bold py-3 rounded-xl transition-all"
+                >
+                  Close
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
