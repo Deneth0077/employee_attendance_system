@@ -154,47 +154,60 @@ export default function Home() {
   }, [fileText, selectedEmployees, month, year]);
 
   const downloadBulkNetHoursExcel = () => {
-    if (exportSummaries.length === 0) return;
+    if (selectedEmployees.length === 0 || !fileText) return;
 
     try {
-      const summaryData = exportSummaries.map(s => ({
-        "Employee ID": s.employeeId,
-        "Year": year,
-        "Month": new Date(0, parseInt(month) - 1).toLocaleString('default', { month: 'long' }),
-        "Total Days": s.totalDays,
-        "Present Days": s.presentDays,
-        "Absent Days": s.absentDays,
-        "Total Hours (Decimal)": s.totalHours,
-        "Total Net Hours (Decimal)": s.totalNetHours,
-        "Total Net Hours (Formatted)": s.formattedNetHours
+      const m = parseInt(month);
+      const y = parseInt(year);
+      const dateObj = new Date(y, m - 1, 1);
+      const allExpectedDates = [];
+      while (dateObj.getMonth() === m - 1) {
+        allExpectedDates.push(`${y}-${String(m).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`);
+        dateObj.setDate(dateObj.getDate() + 1);
+      }
+
+      const employeeReports = selectedEmployees.map(id => ({
+        id,
+        report: analyzeAttendance(fileText, id, month, year)
       }));
 
-      let detailedData = [];
-      exportSummaries.forEach(s => {
-        const report = analyzeAttendance(fileText, s.employeeId, month, year);
-        report.dailyRecords.forEach(r => {
-          detailedData.push({
-            "Employee ID": s.employeeId,
-            "Date": r.date,
-            "Day": new Date(r.date).toLocaleDateString("en-US", { weekday: "short" }),
-            "IN Time": r.inTime,
-            "OUT Time": r.outTime,
-            "Total Hours": formatDuration(r.totalHours),
-            "Net Hours": formatDuration(r.netHours),
-            "Status": r.status
+      // Sheet 1: Net Hours Grid (rows are dates, columns are employee IDs)
+      const gridData = allExpectedDates.map(dateStr => {
+        const row = {
+          "Date": dateStr,
+          "Day": new Date(dateStr).toLocaleDateString("en-US", { weekday: "short" })
+        };
+        employeeReports.forEach(emp => {
+          const dailyRecord = emp.report.dailyRecords.find(r => r.date === dateStr);
+          row[`ID: ${emp.id}`] = dailyRecord ? (dailyRecord.netHours || 0) : 0;
+        });
+        return row;
+      });
+
+      // Sheet 2: Net Hours Flat List
+      const listData = [];
+      allExpectedDates.forEach(dateStr => {
+        const dayStr = new Date(dateStr).toLocaleDateString("en-US", { weekday: "short" });
+        employeeReports.forEach(emp => {
+          const dailyRecord = emp.report.dailyRecords.find(r => r.date === dateStr);
+          listData.push({
+            "Date": dateStr,
+            "Day": dayStr,
+            "Employee ID": emp.id,
+            "Net Hours": dailyRecord ? (dailyRecord.netHours || 0) : 0
           });
         });
       });
 
       const wb = XLSX.utils.book_new();
       
-      const wsSummary = XLSX.utils.json_to_sheet(summaryData);
-      XLSX.utils.book_append_sheet(wb, wsSummary, "Net Hours Summary");
+      const wsGrid = XLSX.utils.json_to_sheet(gridData);
+      XLSX.utils.book_append_sheet(wb, wsGrid, "Net Hours Grid");
 
-      const wsDetailed = XLSX.utils.json_to_sheet(detailedData);
-      XLSX.utils.book_append_sheet(wb, wsDetailed, "Daily Breakdown");
+      const wsList = XLSX.utils.json_to_sheet(listData);
+      XLSX.utils.book_append_sheet(wb, wsList, "Net Hours List");
 
-      const fileName = `Net_Hours_Summary_${month}_${year}.xlsx`;
+      const fileName = `Bulk_Net_Hours_${month}_${year}.xlsx`;
       XLSX.writeFile(wb, fileName);
     } catch (err) {
       console.error("Excel Export failed", err);
@@ -539,7 +552,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen gradient-bg py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto space-y-8">
+      <div className="w-full max-w-[1400px] mx-auto space-y-8">
 
         {/* Header */}
         <div className="text-center space-y-2">
@@ -591,7 +604,7 @@ export default function Home() {
         </div>
 
         {activeTab === "analyzer" && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
 
           {/* Controls Panel */}
           <motion.div
@@ -736,7 +749,7 @@ export default function Home() {
           </motion.div>
 
           {/* Results Area */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-3 space-y-6">
             <AnimatePresence mode="wait">
               {results.length === 0 ? (
                 <motion.div
@@ -958,7 +971,7 @@ export default function Home() {
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 15 }}
-            className="grid grid-cols-1 lg:grid-cols-3 gap-8"
+            className="grid grid-cols-1 lg:grid-cols-4 gap-8"
           >
             {/* Controls Panel */}
             <div className="lg:col-span-1 space-y-6">
@@ -1086,7 +1099,7 @@ export default function Home() {
             </div>
 
             {/* Results/Preview Area */}
-            <div className="lg:col-span-2 space-y-6">
+            <div className="lg:col-span-3 space-y-6">
               {exportSummaries.length === 0 ? (
                 <div className="h-full min-h-[400px] glass-morphism rounded-3xl flex flex-col items-center justify-center text-center p-8 border-dashed border-2">
                   <FileText className="w-16 h-16 text-muted-foreground/30 mb-4" />
@@ -1120,9 +1133,6 @@ export default function Home() {
                         <tr className="bg-white/5 text-muted-foreground text-[10px] uppercase tracking-wider">
                           <th className="px-6 py-4 font-semibold">Employee ID</th>
                           <th className="px-6 py-4 font-semibold text-center">Total Days</th>
-                          <th className="px-6 py-4 font-semibold text-center">Present</th>
-                          <th className="px-6 py-4 font-semibold text-center">Absent</th>
-                          <th className="px-6 py-4 font-semibold text-center">Total Hours</th>
                           <th className="px-6 py-4 font-semibold text-center">Net Hours</th>
                           <th className="px-6 py-4 font-semibold text-center">Net Hours (Formatted)</th>
                         </tr>
@@ -1140,9 +1150,6 @@ export default function Home() {
                               ID: {row.employeeId}
                             </td>
                             <td className="px-6 py-4 text-center font-mono text-sm">{row.totalDays}</td>
-                            <td className="px-6 py-4 text-center text-emerald-400 font-mono text-sm">{row.presentDays}</td>
-                            <td className="px-6 py-4 text-center text-gray-400 font-mono text-sm">{row.absentDays}</td>
-                            <td className="px-6 py-4 text-center font-mono text-sm">{row.totalHours}h</td>
                             <td className="px-6 py-4 text-center text-indigo-400 font-mono text-sm font-bold">{row.totalNetHours}h</td>
                             <td className="px-6 py-4 text-center text-purple-400 font-mono text-sm font-bold">{row.formattedNetHours}</td>
                           </motion.tr>
