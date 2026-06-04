@@ -29,6 +29,13 @@ Your job is to:
 1. Verify if the computed daily records match the raw log data and the specified logic rules.
 2. Identify discrepancies between raw log data + rules and the calculated results.
 3. Identify practical anomalies or suspicious patterns in the attendance itself.
+4. Classify the employee's work schedule category based on their monthly attendance patterns.
+5. Create a corrected version of the daily records by resolving logging errors (such as incorrect scan types or missing check-in/check-out taps).
+
+**WORKER SCHEDULE CATEGORIES**:
+1. Office Workers: Standard office hours (e.g., 7:00 AM or 8:00 AM to 5:00 PM). If they work more than these hours, they might earn overtime (OT).
+2. Shift Workers: Rotating shift schedules, typically 12-hour shifts. E.g., 3 days Day Shift (7:00 AM to 7:00 PM), 3 days Night Shift (7:00 PM to 7:00 AM next day), and 3 days Off.
+3. Unknown: If the pattern does not fit either of the above.
 
 **BUSINESS LOGIC RULES**:
 1. Double Tap Detection:
@@ -50,6 +57,12 @@ Your job is to:
      - NO IN RECORD: if any session on that day has NO IN RECORD status (unless overridden by OUT MISSING).
      - ABSENT: if no sessions on that day.
 
+**LOGGING ERROR CORRECTIONS (AI CORRECTIONS)**:
+Biometric fingerprint machines can record incorrect scan directions or be missed entirely. Detect and correct these mistakes:
+- **Incorrect Scan Status (Machine switch error)**: If a worker has two check-ins (e.g. 7:05 AM check-in status 0 and 6:00 PM check-in status 0) because they forgot to switch the machine status, recognize that the second scan was meant to be a check-out (status 1). Correct the scan status to OUT and recalculate the day as a single NORMAL session (e.g., 7:05 AM to 6:00 PM) instead of two "OUT MISSING" sessions.
+- **Missing Check-In or Check-Out**: If a check-in or check-out is missing but it is clear the employee worked (based on their typical schedule pattern), infer and estimate the missing tap time (e.g. inferring a 5:00 PM check-out for a standard office worker who checked in at 7:45 AM but has no check-out, or inferring a 7:00 PM check-out for a shift worker who checked in at 7:00 AM). Update the status to "NORMAL" and recalculate hours.
+- If you perform a correction for a day, flag it as corrected and explain what was changed.
+
 **INPUT DATA**:
 - Employee ID: ${employeeId}
 - Period: ${month}/${year}
@@ -60,15 +73,15 @@ ${rawLogs || "(No raw logs provided)"}
 ${JSON.stringify(dailyRecords, null, 2)}
 
 **YOUR TASK**:
-Analyze the raw logs and compare them step-by-step with the calculated daily records according to the business logic rules.
-Identify:
-1. **Discrepancies**: Any calculation error in the calculated daily records (e.g. incorrect status, wrong hours, missed duplicate taps, wrong net hours).
-2. **Anomalies**: Any strange attendance patterns (e.g. extremely long shifts > 16 hours, check-ins at unusual hours like 3 AM, or multiple entries/exits in one day).
+1. Analyze raw logs and classify the employee's work schedule category (Office Worker, Shift Worker, or Unknown).
+2. Compare the raw logs step-by-step with the calculated daily records according to the business logic rules to find discrepancies or anomalies.
+3. Generate a corrected version of the daily records. For each day, if you detect a scan status error or missing tap, correct the times, totalHours, netHours, and status, and set isCorrected=true. If no changes are needed, copy the calculated daily record values with isCorrected=false.
 
 Provide the output in JSON format. The output MUST be valid JSON only, matching this schema:
 {
   "hasIssue": true/false, // true if there are discrepancies or high-severity anomalies
   "summary": "Overall summary of the audit",
+  "employeeCategory": "Office Worker (7/8 AM - 5 PM)" | "Shift Worker (3 Days Day Shift, 3 Days Night Shift, 3 Days Off)" | "Unknown",
   "discrepancies": [
     {
       "date": "YYYY-MM-DD",
@@ -81,6 +94,19 @@ Provide the output in JSON format. The output MUST be valid JSON only, matching 
       "date": "YYYY-MM-DD",
       "severity": "medium" | "low",
       "description": "Description of the anomaly"
+    }
+  ],
+  "correctedRecords": [
+    {
+      "date": "YYYY-MM-DD",
+      "inTime": "HH:MM", // corrected or original in time (e.g. "07:05" or "-")
+      "outTime": "HH:MM", // corrected or original out time (e.g. "18:00" or "-")
+      "totalHours": 10.92, // corrected or original totalHours (float)
+      "netHours": 10.0, // corrected or original netHours (float)
+      "status": "NORMAL" | "OUT MISSING" | "NO IN RECORD" | "ABSENT", // corrected or original status
+      "isCorrected": true/false, // true if AI modified any value for this date
+      "correctedFields": ["inTime" | "outTime" | "totalHours" | "netHours" | "status"], // array of fields that were corrected
+      "explanation": "Description of the correction made (e.g. Corrected 6:00 PM IN scan to OUT as it is the end of the shift)" // empty string if not corrected
     }
   ]
 }

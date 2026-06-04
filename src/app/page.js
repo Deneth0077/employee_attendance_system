@@ -49,6 +49,7 @@ const styleMissingRecords = (ws) => {
     if (cellRef.startsWith("!")) continue;
     const cell = ws[cellRef];
     if (cell && typeof cell.v === "string") {
+      // 1. Missing check-in or check-out styling (pink/red background)
       if (cell.v.includes("(NO IN)") || cell.v.includes("(NO OUT)")) {
         cell.s = {
           fill: {
@@ -60,6 +61,28 @@ const styleMissingRecords = (ws) => {
             sz: 10,
             bold: true,
             color: { rgb: "990000" } // Dark red text
+          },
+          alignment: {
+            horizontal: "center",
+            vertical: "center"
+          }
+        };
+      }
+
+      // 2. AI corrected records styling (green background)
+      if (cell.v.includes("(AI CORRECTED)")) {
+        // Strip the marker to make Excel value clean (e.g. "18:00" instead of "18:00 (AI CORRECTED)")
+        cell.v = cell.v.replace(" (AI CORRECTED)", "");
+        cell.s = {
+          fill: {
+            patternType: "solid",
+            fgColor: { rgb: "E2FFE2" } // Soft pastel green background
+          },
+          font: {
+            name: "Arial",
+            sz: 10,
+            bold: true,
+            color: { rgb: "006600" } // Dark green text
           },
           alignment: {
             horizontal: "center",
@@ -117,6 +140,7 @@ export default function Home() {
   const [isAuditing, setIsAuditing] = useState(false);
   const [auditError, setAuditError] = useState("");
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [applyAiCorrections, setApplyAiCorrections] = useState(false);
 
   const handleSaveApiKey = (key) => {
     setUserApiKey(key);
@@ -285,9 +309,31 @@ export default function Home() {
       }
 
       const report = analyzeAttendance(fileText, empId, month, year);
+      const empAudit = aiAuditResults[empId];
+      let records = report.dailyRecords;
+
+      if (applyAiCorrections && empAudit?.correctedRecords) {
+        records = report.dailyRecords.map(origRow => {
+          const corrected = empAudit.correctedRecords.find(c => c.date === origRow.date);
+          if (corrected) {
+            return {
+              ...origRow,
+              inTime: corrected.inTime,
+              outTime: corrected.outTime,
+              totalHours: corrected.totalHours,
+              netHours: corrected.netHours,
+              status: corrected.status,
+              isAiCorrected: corrected.isCorrected,
+              correctedFields: corrected.correctedFields || [],
+              explanation: corrected.explanation || "",
+            };
+          }
+          return origRow;
+        });
+      }
 
       const sheetData = allExpectedDates.map(dateStr => {
-        const dailyRecord = report.dailyRecords.find(r => r.date === dateStr);
+        const dailyRecord = records.find(r => r.date === dateStr);
         let netHoursVal = 0;
         if (dailyRecord) {
           if (dailyRecord.status === "NO IN RECORD") {
@@ -298,6 +344,11 @@ export default function Home() {
             netHoursVal = 0;
           } else {
             netHoursVal = dailyRecord.netHours || 0;
+          }
+
+          // Append AI Correction marker if corrected by AI
+          if (dailyRecord.isAiCorrected && dailyRecord.correctedFields?.includes("netHours")) {
+            netHoursVal = `${netHoursVal} (AI CORRECTED)`;
           }
         }
         return {
@@ -334,6 +385,7 @@ export default function Home() {
     setError("");
     setAiAuditResults({});
     setAuditError("");
+    setApplyAiCorrections(false);
 
     try {
       const text = fileText || await file.text();
@@ -390,10 +442,34 @@ export default function Home() {
         dateObj.setDate(dateObj.getDate() + 1);
       }
 
-      const employeeReports = selectedEmployeesNet.map(id => ({
-        id,
-        report: analyzeAttendance(fileText, id, month, year)
-      }));
+      const employeeReports = selectedEmployeesNet.map(id => {
+        const report = analyzeAttendance(fileText, id, month, year);
+        const empAudit = aiAuditResults[id];
+        let records = report.dailyRecords;
+        if (applyAiCorrections && empAudit?.correctedRecords) {
+          records = report.dailyRecords.map(origRow => {
+            const corrected = empAudit.correctedRecords.find(c => c.date === origRow.date);
+            if (corrected) {
+              return {
+                ...origRow,
+                inTime: corrected.inTime,
+                outTime: corrected.outTime,
+                totalHours: corrected.totalHours,
+                netHours: corrected.netHours,
+                status: corrected.status,
+                isAiCorrected: corrected.isCorrected,
+                correctedFields: corrected.correctedFields || [],
+                explanation: corrected.explanation || "",
+              };
+            }
+            return origRow;
+          });
+        }
+        return {
+          id,
+          records
+        };
+      });
 
       // Sheet 1: Net Hours Grid (rows are employee IDs, columns are dates at the top)
       const headerDates = ["Employee ID", ...allExpectedDates];
@@ -402,7 +478,7 @@ export default function Home() {
       const gridRows = employeeReports.map(emp => {
         const rowData = [emp.id];
         allExpectedDates.forEach(dateStr => {
-          const dailyRecord = emp.report.dailyRecords.find(r => r.date === dateStr);
+          const dailyRecord = emp.records.find(r => r.date === dateStr);
           let netHoursVal = 0;
           if (dailyRecord) {
             if (dailyRecord.status === "NO IN RECORD") {
@@ -413,6 +489,11 @@ export default function Home() {
               netHoursVal = 0;
             } else {
               netHoursVal = dailyRecord.netHours || 0;
+            }
+
+            // Append AI Correction marker if corrected by AI
+            if (dailyRecord.isAiCorrected && dailyRecord.correctedFields?.includes("netHours")) {
+              netHoursVal = `${netHoursVal} (AI CORRECTED)`;
             }
           }
           rowData.push(netHoursVal);
@@ -427,7 +508,7 @@ export default function Home() {
       allExpectedDates.forEach(dateStr => {
         const dayStr = new Date(dateStr).toLocaleDateString("en-US", { weekday: "short" });
         employeeReports.forEach(emp => {
-          const dailyRecord = emp.report.dailyRecords.find(r => r.date === dateStr);
+          const dailyRecord = emp.records.find(r => r.date === dateStr);
           let netHoursVal = 0;
           if (dailyRecord) {
             if (dailyRecord.status === "NO IN RECORD") {
@@ -438,6 +519,11 @@ export default function Home() {
               netHoursVal = 0;
             } else {
               netHoursVal = dailyRecord.netHours || 0;
+            }
+
+            // Append AI Correction marker if corrected by AI
+            if (dailyRecord.isAiCorrected && dailyRecord.correctedFields?.includes("netHours")) {
+              netHoursVal = `${netHoursVal} (AI CORRECTED)`;
             }
           }
           listData.push({
@@ -552,15 +638,40 @@ export default function Home() {
   };
 
   const result = results[activeResultIndex];
+  const audit = aiAuditResults[result?.employeeId];
 
-  const filteredDailyRecords = result?.dailyRecords.filter(row => {
+  const dailyRecordsToRender = useMemo(() => {
+    if (!result) return [];
+    if (applyAiCorrections && audit?.correctedRecords) {
+      return result.dailyRecords.map(origRow => {
+        const corrected = audit.correctedRecords.find(c => c.date === origRow.date);
+        if (corrected) {
+          return {
+            ...origRow,
+            inTime: corrected.inTime,
+            outTime: corrected.outTime,
+            totalHours: corrected.totalHours,
+            netHours: corrected.netHours,
+            status: corrected.status,
+            isAiCorrected: corrected.isCorrected,
+            correctedFields: corrected.correctedFields || [],
+            explanation: corrected.explanation || "",
+          };
+        }
+        return origRow;
+      });
+    }
+    return result.dailyRecords;
+  }, [result, applyAiCorrections, audit]);
+
+  const filteredDailyRecords = dailyRecordsToRender.filter(row => {
     if (!tableFilter) return true;
     const dateObj = new Date(row.date);
     const dayLong = dateObj.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
     const dayShort = dateObj.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
     const query = tableFilter.toLowerCase();
     return row.date.includes(query) || dayLong.includes(query) || dayShort.includes(query);
-  }) || [];
+  });
 
   const getExportData = () => {
     const currentResult = results[activeResultIndex];
@@ -569,36 +680,60 @@ export default function Home() {
     // Prioritize selected rows, then filtered rows, then all records
     let recordsToExport = [];
     if (selectedRows.length > 0) {
-      recordsToExport = currentResult.dailyRecords.filter(r => selectedRows.includes(r.date));
+      recordsToExport = dailyRecordsToRender.filter(r => selectedRows.includes(r.date));
     } else if (tableFilter) {
       recordsToExport = filteredDailyRecords;
     } else {
-      recordsToExport = currentResult.dailyRecords;
+      recordsToExport = dailyRecordsToRender;
     }
 
-    return recordsToExport.map(r => ({
-      "Employee ID": currentResult.employeeId,
-      "Date": r.date,
-      "Day": new Date(r.date).toLocaleDateString("en-US", { weekday: "short" }),
-      "IN Time": r.inTime,
-      "OUT Time": r.outTime,
-      "Scans": r.scanCount,
-      "Hours": formatDuration(r.totalHours),
-      "Net Hours": formatDuration(r.netHours),
-      "Status": r.status
-    }));
+    return recordsToExport.map(r => {
+      const isCorrected = r.isAiCorrected;
+      return {
+        "Employee ID": currentResult.employeeId,
+        "Date": r.date,
+        "Day": new Date(r.date).toLocaleDateString("en-US", { weekday: "short" }),
+        "IN Time": r.inTime + (isCorrected && r.correctedFields.includes("inTime") ? " (AI CORRECTED)" : ""),
+        "OUT Time": r.outTime + (isCorrected && r.correctedFields.includes("outTime") ? " (AI CORRECTED)" : ""),
+        "Scans": r.scanCount,
+        "Hours": formatDuration(r.totalHours) + (isCorrected && r.correctedFields.includes("totalHours") ? " (AI CORRECTED)" : ""),
+        "Net Hours": formatDuration(r.netHours) + (isCorrected && r.correctedFields.includes("netHours") ? " (AI CORRECTED)" : ""),
+        "Status": r.status + (isCorrected && r.correctedFields.includes("status") ? " (AI CORRECTED)" : "")
+      };
+    });
   };
 
   const getExportAllData = () => {
     let combinedExport = [];
 
     results.forEach(res => {
-      // Apply similar tableFilter if you desired, otherwise export all original records for the selected workers.
+      const empAudit = aiAuditResults[res.employeeId];
       let recordsToExport = res.dailyRecords;
+
+      if (applyAiCorrections && empAudit?.correctedRecords) {
+        recordsToExport = res.dailyRecords.map(origRow => {
+          const corrected = empAudit.correctedRecords.find(c => c.date === origRow.date);
+          if (corrected) {
+            return {
+              ...origRow,
+              inTime: corrected.inTime,
+              outTime: corrected.outTime,
+              totalHours: corrected.totalHours,
+              netHours: corrected.netHours,
+              status: corrected.status,
+              isAiCorrected: corrected.isCorrected,
+              correctedFields: corrected.correctedFields || [],
+              explanation: corrected.explanation || "",
+            };
+          }
+          return origRow;
+        });
+      }
+
       if (selectedRows.length > 0) {
-        recordsToExport = res.dailyRecords.filter(r => selectedRows.includes(r.date));
+        recordsToExport = recordsToExport.filter(r => selectedRows.includes(r.date));
       } else if (tableFilter) {
-        recordsToExport = res.dailyRecords.filter(row => {
+        recordsToExport = recordsToExport.filter(row => {
           const dateObj = new Date(row.date);
           const dayLong = dateObj.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
           const dayShort = dateObj.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
@@ -607,17 +742,20 @@ export default function Home() {
         });
       }
 
-      const rows = recordsToExport.map(r => ({
-        "Employee ID": res.employeeId,
-        "Date": r.date,
-        "Day": new Date(r.date).toLocaleDateString("en-US", { weekday: "short" }),
-        "IN Time": r.inTime,
-        "OUT Time": r.outTime,
-        "Scans": r.scanCount,
-        "Hours": formatDuration(r.totalHours),
-        "Net Hours": formatDuration(r.netHours),
-        "Status": r.status
-      }));
+      const rows = recordsToExport.map(r => {
+        const isCorrected = r.isAiCorrected;
+        return {
+          "Employee ID": res.employeeId,
+          "Date": r.date,
+          "Day": new Date(r.date).toLocaleDateString("en-US", { weekday: "short" }),
+          "IN Time": r.inTime + (isCorrected && r.correctedFields.includes("inTime") ? " (AI CORRECTED)" : ""),
+          "OUT Time": r.outTime + (isCorrected && r.correctedFields.includes("outTime") ? " (AI CORRECTED)" : ""),
+          "Scans": r.scanCount,
+          "Hours": formatDuration(r.totalHours) + (isCorrected && r.correctedFields.includes("totalHours") ? " (AI CORRECTED)" : ""),
+          "Net Hours": formatDuration(r.netHours) + (isCorrected && r.correctedFields.includes("netHours") ? " (AI CORRECTED)" : ""),
+          "Status": r.status + (isCorrected && r.correctedFields.includes("status") ? " (AI CORRECTED)" : "")
+        };
+      });
 
       combinedExport = combinedExport.concat(rows);
     });
@@ -1092,10 +1230,32 @@ export default function Home() {
                           <p className="text-xs text-muted-foreground">
                             Verify calculation accuracy and detect anomalies using Google Gemini API.
                           </p>
+                          {aiAuditResults[result?.employeeId]?.employeeCategory && (
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className="text-[10px] text-muted-foreground font-semibold">Classified Category:</span>
+                              <span className="text-[10px] font-bold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                                {aiAuditResults[result.employeeId].employeeCategory}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-3">
+                        {aiAuditResults[result?.employeeId] && (
+                          <label className="flex items-center gap-2 p-2 bg-indigo-500/5 hover:bg-indigo-500/10 border border-indigo-500/20 rounded-xl cursor-pointer transition-all select-none">
+                            <input
+                              type="checkbox"
+                              className="accent-indigo-500 w-4 h-4 rounded border-glass-border bg-glass"
+                              checked={applyAiCorrections}
+                              onChange={(e) => setApplyAiCorrections(e.target.checked)}
+                            />
+                            <span className="text-xs font-bold text-indigo-300 uppercase tracking-tight flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> Apply AI Corrections
+                            </span>
+                          </label>
+                        )}
+
                         <button
                           onClick={() => setShowSettingsModal(true)}
                           className="p-2.5 bg-white/5 hover:bg-white/10 border border-glass-border rounded-xl transition-all text-muted-foreground hover:text-white cursor-pointer"
@@ -1343,8 +1503,26 @@ export default function Home() {
                                   <span className="text-sm">{row.date}</span>
                                 </div>
                               </td>
-                              <td className="px-6 py-4 text-emerald-400 font-mono text-sm">{row.inTime}</td>
-                              <td className="px-6 py-4 text-amber-400 font-mono text-sm">
+                              <td 
+                                className={cn(
+                                  "px-6 py-4 font-mono text-sm",
+                                  row.isAiCorrected && row.correctedFields?.includes("inTime")
+                                    ? "text-emerald-300 bg-emerald-500/10 border-l-2 border-emerald-500 font-bold"
+                                    : "text-emerald-400"
+                                )}
+                                title={row.isAiCorrected && row.correctedFields?.includes("inTime") ? row.explanation : undefined}
+                              >
+                                {row.inTime}
+                              </td>
+                              <td 
+                                className={cn(
+                                  "px-6 py-4 font-mono text-sm",
+                                  row.isAiCorrected && row.correctedFields?.includes("outTime")
+                                    ? "text-emerald-300 bg-emerald-500/10 border-l-2 border-emerald-500 font-bold"
+                                    : "text-amber-400"
+                                )}
+                                title={row.isAiCorrected && row.correctedFields?.includes("outTime") ? row.explanation : undefined}
+                              >
                                 <div className="flex items-center gap-1.5">
                                   {row.outTime}
                                   {row.isNextDayOut && (
@@ -1360,10 +1538,26 @@ export default function Home() {
                                   {row.scanCount}
                                 </button>
                               </td>
-                              <td className="px-6 py-4 font-semibold text-center text-sm">
+                              <td 
+                                className={cn(
+                                  "px-6 py-4 font-semibold text-center text-sm",
+                                  row.isAiCorrected && row.correctedFields?.includes("totalHours")
+                                    ? "text-emerald-300 bg-emerald-500/10 font-bold"
+                                    : ""
+                                )}
+                                title={row.isAiCorrected && row.correctedFields?.includes("totalHours") ? row.explanation : undefined}
+                              >
                                 {typeof row.totalHours === 'number' ? formatDuration(row.totalHours) : '--'}
                               </td>
-                              <td className="px-6 py-4 font-semibold text-center text-sm">
+                              <td 
+                                className={cn(
+                                  "px-6 py-4 font-semibold text-center text-sm",
+                                  row.isAiCorrected && row.correctedFields?.includes("netHours")
+                                    ? "text-emerald-300 bg-emerald-500/10 font-bold"
+                                    : ""
+                                )}
+                                title={row.isAiCorrected && row.correctedFields?.includes("netHours") ? row.explanation : undefined}
+                              >
                                 <div className="flex flex-col items-center justify-center gap-1">
                                   <span>{typeof row.netHours === 'number' ? formatDuration(row.netHours) : '--'}</span>
                                   {(() => {
@@ -1378,8 +1572,17 @@ export default function Home() {
                                   })()}
                                 </div>
                               </td>
-                              <td className="px-6 py-4">
-                                <StatusBadge status={row.status} />
+                              <td 
+                                className="px-6 py-4"
+                                title={row.isAiCorrected && row.correctedFields?.includes("status") ? row.explanation : undefined}
+                              >
+                                {row.isAiCorrected && row.correctedFields?.includes("status") ? (
+                                  <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
+                                    {row.status}
+                                  </span>
+                                ) : (
+                                  <StatusBadge status={row.status} />
+                                )}
                               </td>
                             </motion.tr>
                           ))}
