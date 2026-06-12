@@ -129,6 +129,7 @@ export default function Home() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportStartDate, setExportStartDate] = useState("");
   const [exportEndDate, setExportEndDate] = useState("");
+  const [isMonthReportMode, setIsMonthReportMode] = useState(false);
 
   const [viewEmployeeNetHours, setViewEmployeeNetHours] = useState(null);
   const [bulkPasteInput, setBulkPasteInput] = useState("");
@@ -206,6 +207,7 @@ export default function Home() {
     if (selectedFile) {
       setFile(selectedFile);
       setError("");
+      setIsMonthReportMode(false);
 
       try {
         const text = await selectedFile.text();
@@ -371,7 +373,7 @@ export default function Home() {
     }
   };
 
-  const processData = async (targetEmployees = selectedEmployees) => {
+  const processData = async (targetEmployees = selectedEmployees, useRange = !isMonthReportMode) => {
     if (!file) return;
     if (targetEmployees.length === 0) {
       setResults([]);
@@ -388,15 +390,22 @@ export default function Home() {
       const text = fileText || await file.text();
       if (!fileText) setFileText(text);
 
-      const today = new Date();
-      const endStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      const startDateObj = new Date();
-      startDateObj.setDate(today.getDate() - 29);
-      const startStr = `${startDateObj.getFullYear()}-${String(startDateObj.getMonth() + 1).padStart(2, '0')}-${String(startDateObj.getDate()).padStart(2, '0')}`;
+      let allResults;
+      if (useRange) {
+        const today = new Date();
+        const endStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const startDateObj = new Date();
+        startDateObj.setDate(today.getDate() - 29);
+        const startStr = `${startDateObj.getFullYear()}-${String(startDateObj.getMonth() + 1).padStart(2, '0')}-${String(startDateObj.getDate()).padStart(2, '0')}`;
 
-      const allResults = targetEmployees.map(id =>
-        analyzeAttendanceRange(text, id, startStr, endStr)
-      ).filter(res => res.dailyRecords.length > 0);
+        allResults = targetEmployees.map(id =>
+          analyzeAttendanceRange(text, id, startStr, endStr)
+        ).filter(res => res.dailyRecords.length > 0);
+      } else {
+        allResults = targetEmployees.map(id =>
+          analyzeAttendance(text, id, month, year)
+        ).filter(res => res.dailyRecords.length > 0);
+      }
 
       if (allResults.length === 0) {
         setError("No records found for selected employees in the given period.");
@@ -415,11 +424,11 @@ export default function Home() {
   // Auto-generate report when fileText or selectedEmployees changes in Detailed Analyzer
   useEffect(() => {
     if (activeTab === "analyzer" && fileText && selectedEmployees.length > 0) {
-      processData(selectedEmployees);
+      processData(selectedEmployees, !isMonthReportMode);
     } else if (activeTab === "analyzer" && selectedEmployees.length === 0) {
       setResults([]);
     }
-  }, [fileText, selectedEmployees, activeTab]);
+  }, [fileText, selectedEmployees, activeTab, isMonthReportMode]);
 
   const exportSummaries = useMemo(() => {
     if (!fileText || selectedEmployeesNet.length === 0) return [];
@@ -1102,7 +1111,10 @@ export default function Home() {
                     <select
                       className="w-full bg-glass border border-glass-border rounded-xl px-4 py-2 focus:outline-none"
                       value={month}
-                      onChange={(e) => setMonth(e.target.value)}
+                      onChange={(e) => {
+                        setMonth(e.target.value);
+                        setIsMonthReportMode(false);
+                      }}
                     >
                       {Array.from({ length: 12 }, (_, i) => (
                         <option key={i + 1} value={i + 1} className="bg-[#0f0f0f]">
@@ -1119,7 +1131,10 @@ export default function Home() {
                       type="number"
                       className="w-full bg-glass border border-glass-border rounded-xl px-4 py-2 focus:outline-none"
                       value={year}
-                      onChange={(e) => setYear(e.target.value)}
+                      onChange={(e) => {
+                        setYear(e.target.value);
+                        setIsMonthReportMode(false);
+                      }}
                     />
                   </div>
                 </div>
@@ -1133,7 +1148,10 @@ export default function Home() {
                 )}
 
                 <button
-                  onClick={processData}
+                  onClick={() => {
+                    setIsMonthReportMode(true);
+                    processData(selectedEmployees, false);
+                  }}
                   disabled={isProcessing}
                   className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl shadow-lg shadow-indigo-900/20 transition-all flex items-center justify-center gap-2"
                 >
