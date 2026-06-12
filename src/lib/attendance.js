@@ -178,9 +178,6 @@ export function analyzeAttendanceRange(fileText, employeeId, startDate, endDate)
     curr.setDate(curr.getDate() + 1);
   }
 
-  // Reverse to show newest dates first (backwards from end date)
-  allExpectedDates.reverse();
-
   // Filter sessions by date range
   const filteredSessions = sessions.filter(s => {
     const sessionDate = new Date(s.date);
