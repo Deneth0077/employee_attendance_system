@@ -137,7 +137,7 @@ function generateSessions(allEmployeeRecords) {
  * - Time: Scan time (HH:MM:SS)
  * - InOutStatus: 0 means IN, 1 means OUT
  */
-export function analyzeAttendance(fileText, employeeId, month, year) {
+export function analyzeAttendance(fileText, employeeId, month, year, limit30Days = false) {
   const { allEmployeeRecords, sessions } = getEmployeeData(fileText, employeeId);
 
   const m = parseInt(month);
@@ -145,13 +145,17 @@ export function analyzeAttendance(fileText, employeeId, month, year) {
   const dateObj = new Date(y, m - 1, 1);
   const allExpectedDates = [];
   while (dateObj.getMonth() === m - 1) {
+    if (limit30Days && dateObj.getDate() > 30) {
+      break;
+    }
     allExpectedDates.push(`${y}-${String(m).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`);
     dateObj.setDate(dateObj.getDate() + 1);
   }
 
   // 4. Filter sessions by requested month and year (based on the session/report date)
   const filteredSessions = sessions.filter(s => {
-    const [sYear, sMonth] = s.date.split('-').map(Number);
+    const [sYear, sMonth, sDay] = s.date.split('-').map(Number);
+    if (limit30Days && sDay > 30) return false;
     return sMonth === m && sYear === y;
   });
 
