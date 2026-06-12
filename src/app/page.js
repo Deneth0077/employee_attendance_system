@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Upload,
@@ -129,7 +129,6 @@ export default function Home() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportStartDate, setExportStartDate] = useState("");
   const [exportEndDate, setExportEndDate] = useState("");
-  const [limit30Days, setLimit30Days] = useState(false);
 
   const [viewEmployeeNetHours, setViewEmployeeNetHours] = useState(null);
   const [bulkPasteInput, setBulkPasteInput] = useState("");
@@ -305,14 +304,11 @@ export default function Home() {
       const dateObj = new Date(y, m - 1, 1);
       const allExpectedDates = [];
       while (dateObj.getMonth() === m - 1) {
-        if (limit30Days && dateObj.getDate() > 30) {
-          break;
-        }
         allExpectedDates.push(`${y}-${String(m).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`);
         dateObj.setDate(dateObj.getDate() + 1);
       }
 
-      const report = analyzeAttendance(fileText, empId, month, year, limit30Days);
+      const report = analyzeAttendance(fileText, empId, month, year);
       const empAudit = aiAuditResults[empId];
       let records = report.dailyRecords;
 
@@ -375,13 +371,10 @@ export default function Home() {
     }
   };
 
-  const processData = async () => {
-    if (!file) {
-      setError("Please upload an attendance log file.");
-      return;
-    }
-    if (selectedEmployees.length === 0) {
-      setError("Please select at least one Employee ID.");
+  const processData = async (targetEmployees = selectedEmployees) => {
+    if (!file) return;
+    if (targetEmployees.length === 0) {
+      setResults([]);
       return;
     }
 
@@ -394,8 +387,15 @@ export default function Home() {
     try {
       const text = fileText || await file.text();
       if (!fileText) setFileText(text);
-      const allResults = selectedEmployees.map(id =>
-        analyzeAttendance(text, id, month, year, limit30Days)
+
+      const today = new Date();
+      const endStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const startDateObj = new Date();
+      startDateObj.setDate(today.getDate() - 29);
+      const startStr = `${startDateObj.getFullYear()}-${String(startDateObj.getMonth() + 1).padStart(2, '0')}-${String(startDateObj.getDate()).padStart(2, '0')}`;
+
+      const allResults = targetEmployees.map(id =>
+        analyzeAttendanceRange(text, id, startStr, endStr)
       ).filter(res => res.dailyRecords.length > 0);
 
       if (allResults.length === 0) {
@@ -412,10 +412,19 @@ export default function Home() {
     }
   };
 
+  // Auto-generate report when fileText or selectedEmployees changes in Detailed Analyzer
+  useEffect(() => {
+    if (activeTab === "analyzer" && fileText && selectedEmployees.length > 0) {
+      processData(selectedEmployees);
+    } else if (activeTab === "analyzer" && selectedEmployees.length === 0) {
+      setResults([]);
+    }
+  }, [fileText, selectedEmployees, activeTab]);
+
   const exportSummaries = useMemo(() => {
     if (!fileText || selectedEmployeesNet.length === 0) return [];
     return selectedEmployeesNet.map(id => {
-      const report = analyzeAttendance(fileText, id, month, year, limit30Days);
+      const report = analyzeAttendance(fileText, id, month, year);
       const totalNetHours = report.dailyRecords.reduce((sum, r) => sum + (r.netHours || 0), 0);
       const totalHours = report.dailyRecords.reduce((sum, r) => sum + (r.totalHours || 0), 0);
       const presentDays = report.summary.totalDaysWithRecords;
@@ -431,7 +440,7 @@ export default function Home() {
         formattedNetHours: formatDuration(totalNetHours)
       };
     });
-  }, [fileText, selectedEmployeesNet, month, year, limit30Days]);
+  }, [fileText, selectedEmployeesNet, month, year]);
 
   const downloadBulkNetHoursExcel = () => {
     if (selectedEmployeesNet.length === 0 || !fileText) return;
@@ -442,15 +451,12 @@ export default function Home() {
       const dateObj = new Date(y, m - 1, 1);
       const allExpectedDates = [];
       while (dateObj.getMonth() === m - 1) {
-        if (limit30Days && dateObj.getDate() > 30) {
-          break;
-        }
         allExpectedDates.push(`${y}-${String(m).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`);
         dateObj.setDate(dateObj.getDate() + 1);
       }
 
       const employeeReports = selectedEmployeesNet.map(id => {
-        const report = analyzeAttendance(fileText, id, month, year, limit30Days);
+        const report = analyzeAttendance(fileText, id, month, year);
         const empAudit = aiAuditResults[id];
         let records = report.dailyRecords;
         if (applyAiCorrections && empAudit?.correctedRecords) {
@@ -1118,21 +1124,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 py-1 select-none">
-                  <input
-                    type="checkbox"
-                    id="limit30Days"
-                    className="accent-indigo-500 w-4 h-4 rounded border-glass-border bg-glass cursor-pointer"
-                    checked={limit30Days}
-                    onChange={(e) => setLimit30Days(e.target.checked)}
-                  />
-                  <label
-                    htmlFor="limit30Days"
-                    className="text-sm font-medium text-muted-foreground cursor-pointer hover:text-white transition-colors flex items-center gap-1.5"
-                  >
-                    Limit to 30 Days
-                  </label>
-                </div>
+
 
                 {error && (
                   <div className="text-red-400 text-xs flex items-center gap-1">
@@ -1862,7 +1854,7 @@ export default function Home() {
                                 <button
                                   onClick={() => {
                                     try {
-                                      const report = analyzeAttendance(fileText, row.employeeId, month, year, limit30Days);
+                                      const report = analyzeAttendance(fileText, row.employeeId, month, year);
                                       setViewEmployeeNetHours({
                                         employeeId: row.employeeId,
                                         dailyRecords: report.dailyRecords
