@@ -395,7 +395,7 @@ export default function Home() {
         const today = new Date();
         const endStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
         const startDateObj = new Date();
-        startDateObj.setDate(today.getDate() - 29);
+        startDateObj.setDate(today.getDate() - 34);
         const startStr = `${startDateObj.getFullYear()}-${String(startDateObj.getMonth() + 1).padStart(2, '0')}-${String(startDateObj.getDate()).padStart(2, '0')}`;
 
         allResults = targetEmployees.map(id =>
@@ -2127,7 +2127,7 @@ export default function Home() {
 
               <div className="space-y-4">
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  Enter your Google Gemini API Key. This key is saved locally in your browser's localStorage and is used for AI Audits.
+                  Enter your Google Gemini API Key. This key is saved locally in your browser&apos;s localStorage and is used for AI Audits.
                 </p>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
@@ -2141,7 +2141,7 @@ export default function Home() {
                     onChange={(e) => handleSaveApiKey(e.target.value)}
                   />
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    Don't have a key? You can get a free key from Google AI Studio.
+                    Don&apos;t have a key? You can get a free key from Google AI Studio.
                   </p>
                 </div>
               </div>
